@@ -19,7 +19,10 @@ if (!CHAT_ID) {
 const sessionPath = process.env.SESSION_PATH || path.resolve('./.session');
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'whatsapp-bot', dataPath: sessionPath }),
-  puppeteer: { headless: true }
+  puppeteer: {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  }
 });
 
 const pendingActions = new Map();
