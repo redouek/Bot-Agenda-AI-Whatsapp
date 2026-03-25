@@ -249,7 +249,12 @@ async function processIncomingMessage(message) {
     return;
   }
 
-  const chat = await message.getChat();
+  let chat;
+  try {
+    chat = await message.getChat();
+  } catch {
+    return; // ignora tipos não suportados (ex: Canais do WhatsApp)
+  }
   const chatId = chat?.id?._serialized || '';
 
   if (chatId !== CHAT_ID) return;
