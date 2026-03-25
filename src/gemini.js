@@ -118,7 +118,11 @@ function fallbackScheduleProposal(text) {
 }
 
 function buildPrompt({ history, pendingAction, userText, mediaKind }) {
-  const today = new Date().toISOString();
+  const timeZone = process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+  const now = new Date();
+  const todayLocal = now.toLocaleString('pt-BR', { timeZone, hour12: false })
+    + ` (${timeZone}, UTC-3)`;
+
   const historyText = history.length
     ? history.map(item => `[${item.role}] ${item.content}`).join('\n')
     : '(sem historico relevante)';
@@ -130,14 +134,18 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
     'Voce consegue interpretar texto, audio e imagem.',
     'Considere historico recente, a mensagem atual e confirmacoes pendentes.',
     'Se a mensagem for um pedido de agendamento ou trouxer informacoes de evento, produza schedule_proposal.',
+    `REGRA CRITICA de fuso horario: o usuario esta em ${timeZone} (UTC-3, GMT-3). Qualquer horario mencionado pelo usuario (ex: "14:30", "as tres da tarde") esta SEMPRE nesse fuso. O startDateTime DEVE usar o offset -03:00 (ex: "2026-03-25T14:30:00-03:00"). NUNCA trate horarios do usuario como UTC.`,
     'REGRA CRITICA de horario: o horario mencionado pelo usuario e SEMPRE o startDateTime (hora de inicio). Nunca use o horario mencionado como endDateTime. O endDateTime deve ser startDateTime + duracao mencionada, ou startDateTime + 1 hora por padrao.',
+    'Para eventos recorrentes (ex: "toda segunda", "todo dia", "toda semana"), adicione o campo recurrence no evento com a regra RRULE (ex: ["RRULE:FREQ=WEEKLY;BYDAY=MO"]).',
+    'Se a mensagem pedir para ver agenda, compromissos, o que tem marcado, produza list_events com period = "today", "tomorrow", "this_week" ou "date_range" (com startDate e endDate em ISO).',
+    'Se a mensagem pedir para cancelar, deletar ou remover um evento, produza cancel_event com query contendo nome ou descricao do evento.',
     'Se a mensagem pedir informacao atual sobre futebol, jogos, amistosos, tabela ou proximo jogo, produza lookup com source football. O campo query deve conter APENAS o nome do time principal mencionado (ex: "Brazil", "Flamengo", "Real Madrid") — nunca a pergunta completa.',
     'Se a mensagem pedir fato geral, historico ou enciclopedico, produza lookup com source wiki.',
     'Se a mensagem for apenas conversa, produza chat.',
     'Responda apenas JSON valido, sem markdown.',
     'Formato:',
-    '{"kind":"chat|schedule_proposal|lookup|none","reply":"texto opcional","requiresConfirmation":true|false,"event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":""},"lookup":{"source":"football|wiki","query":"consulta objetiva","intent":"fixtures|general"}}',
-    `Data atual ISO: ${today}`,
+    '{"kind":"chat|schedule_proposal|list_events|cancel_event|lookup|none","reply":"texto opcional","requiresConfirmation":true|false,"event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":"","recurrence":[]},"list_events":{"period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"cancel_event":{"query":"nome do evento"},"lookup":{"source":"football|wiki","query":"consulta objetiva","intent":"fixtures|general"}}',
+    `Data/hora atual: ${todayLocal}`,
     `Historico recente:\n${historyText}`,
     `Confirmacao pendente: ${pendingText}`,
     `Tipo da entrada atual: ${mediaKind}`,
@@ -184,6 +192,24 @@ export async function planConversationTurn({ message, type, text, history = [], 
       reply: parsed.reply || 'Interpretei isso como um evento. Posso agendar?',
       requiresConfirmation: true,
       event: normalizedEvent,
+    };
+  }
+
+  if (parsed.kind === 'list_events' && parsed.list_events) {
+    return {
+      kind: 'list_events',
+      reply: parsed.reply || '',
+      requiresConfirmation: false,
+      list_events: parsed.list_events,
+    };
+  }
+
+  if (parsed.kind === 'cancel_event' && parsed.cancel_event?.query) {
+    return {
+      kind: 'cancel_event',
+      reply: parsed.reply || '',
+      requiresConfirmation: false,
+      cancel_event: parsed.cancel_event,
     };
   }
 

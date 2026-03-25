@@ -3,7 +3,7 @@ import qrcode from 'qrcode-terminal';
 import pkg from 'whatsapp-web.js';
 import dotenv from 'dotenv';
 import { planConversationTurn } from './gemini.js';
-import { createEvent } from './calendar.js';
+import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminders } from './calendar.js';
 import { runLookup } from './knowledge.js';
 
 const { Client, LocalAuth } = pkg;
@@ -27,6 +27,7 @@ const client = new Client({
 
 const pendingActions = new Map();
 const processedMessageIds = new Set();
+const sentReminderIds = new Set();
 
 // Textos que o bot enviou — evita loop infinito no self-chat e rotula histórico
 const botSentBodies = new Set();
@@ -179,6 +180,13 @@ async function handlePendingConfirmation(message, chatId, decision) {
   }
 
   try {
+    if (pending.type === 'cancel_event') {
+      await deleteEvent(pending.eventId);
+      pendingActions.delete(chatId);
+      await replyToMessage(message, `Evento "${pending.summary}" cancelado com sucesso.`);
+      return true;
+    }
+
     if (pending.type === 'multiple_events') {
       const created = await createMultipleEvents(pending.events || []);
       pendingActions.delete(chatId);
@@ -213,6 +221,96 @@ async function handlePendingConfirmation(message, chatId, decision) {
   }
 }
 
+function formatEventsList(events, timeZone) {
+  if (!events.length) return 'Nenhum evento encontrado.';
+  return events.map((e, i) => {
+    const start = e.start?.dateTime || e.start?.date;
+    const time = e.start?.dateTime
+      ? formatTimeOnly(start, timeZone)
+      : 'dia inteiro';
+    const date = formatDateOnly(start, timeZone);
+    return `${i + 1}. ${e.summary} — ${date} ${time}${e.id ? ` (ID:${e.id.slice(-6)})` : ''}`;
+  }).join('\n');
+}
+
+function getPeriodRange(period, startDate, endDate) {
+  const tz = process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+  const now = new Date();
+
+  const startOfDay = (d) => {
+    const s = new Date(d.toLocaleString('en-US', { timeZone: tz }));
+    s.setHours(0, 0, 0, 0);
+    return new Date(d.getTime() - (new Date(d.toLocaleString('en-US', { timeZone: tz })).getTime() - d.getTime()) + s.getTime() - new Date(d.toLocaleString('en-US', { timeZone: tz })).setHours(0,0,0,0));
+  };
+
+  if (period === 'today') {
+    const start = new Date(now);
+    start.setSeconds(0, 0);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+
+  if (period === 'tomorrow') {
+    const start = new Date(now);
+    start.setDate(start.getDate() + 1);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+
+  if (period === 'this_week') {
+    const start = new Date(now);
+    start.setSeconds(0, 0);
+    const end = new Date(now);
+    end.setDate(end.getDate() + 7);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+
+  if (period === 'date_range' && startDate && endDate) {
+    return { start: new Date(startDate).toISOString(), end: new Date(endDate).toISOString() };
+  }
+
+  // fallback: hoje
+  const start = new Date(now);
+  start.setSeconds(0, 0);
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+async function startReminderLoop(sendFn) {
+  const REMINDER_MINUTES = parseInt(process.env.REMINDER_MINUTES || '15', 10);
+  const timeZone = process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+
+  setInterval(async () => {
+    try {
+      const upcoming = await getUpcomingReminders(REMINDER_MINUTES);
+      for (const event of upcoming) {
+        const id = event.id;
+        if (!id || sentReminderIds.has(id)) continue;
+
+        const start = event.start?.dateTime;
+        const minutesLeft = Math.round((new Date(start) - Date.now()) / 60000);
+        if (minutesLeft < 0) continue;
+
+        sentReminderIds.add(id);
+        if (sentReminderIds.size > 200) {
+          const first = sentReminderIds.values().next().value;
+          sentReminderIds.delete(first);
+        }
+
+        const msg = `⏰ Lembrete: *${event.summary}* em ${minutesLeft} minuto${minutesLeft !== 1 ? 's' : ''} (${formatTimeOnly(start, timeZone)})${event.location ? `\n📍 ${event.location}` : ''}`;
+        await sendFn(msg);
+      }
+    } catch (error) {
+      console.warn('[reminder] Erro ao checar lembretes:', error?.message);
+    }
+  }, 60 * 1000);
+}
+
 client.on('qr', qr => {
   console.log('QR code gerado. Escaneie com seu WhatsApp.');
   qrcode.generate(qr, { small: true });
@@ -230,6 +328,15 @@ client.on('ready', async () => {
   } catch (error) {
     console.warn('Nao foi possivel consultar estado:', error?.message || error);
   }
+
+  startReminderLoop(async (text) => {
+    try {
+      trackBotSentBody(text);
+      await client.sendMessage(CHAT_ID, text);
+    } catch (err) {
+      console.error('[reminder] Falha ao enviar lembrete:', err?.message);
+    }
+  });
 });
 
 client.on('auth_failure', error => {
@@ -293,6 +400,59 @@ async function processIncomingMessage(message) {
       : formatPendingActionForConfirmation(nextPendingAction);
 
     await replyToMessage(message, responseText);
+    return;
+  }
+
+  if (plan.kind === 'list_events' && plan.list_events) {
+    try {
+      const timeZone = process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+      const { start, end } = getPeriodRange(
+        plan.list_events.period,
+        plan.list_events.startDate,
+        plan.list_events.endDate
+      );
+      const events = await listEvents(start, end);
+      const lista = formatEventsList(events, timeZone);
+      await replyToMessage(message, lista);
+    } catch (error) {
+      console.error('Erro ao listar eventos:', error);
+      await replyToMessage(message, 'Nao consegui consultar sua agenda agora.');
+    }
+    return;
+  }
+
+  if (plan.kind === 'cancel_event' && plan.cancel_event?.query) {
+    try {
+      const events = await searchEvents(plan.cancel_event.query);
+      if (!events.length) {
+        await replyToMessage(message, `Nao encontrei nenhum evento com "${plan.cancel_event.query}".`);
+        return;
+      }
+
+      const timeZone = process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+      if (events.length === 1) {
+        const e = events[0];
+        const nextPendingAction = {
+          type: 'cancel_event',
+          eventId: e.id,
+          summary: e.summary,
+          createdAt: Date.now(),
+        };
+        pendingActions.set(chatId, nextPendingAction);
+        const start = e.start?.dateTime || e.start?.date;
+        await replyToMessage(
+          message,
+          `Quer cancelar "${e.summary}" (${formatDateOnly(start, timeZone)} ${e.start?.dateTime ? formatTimeOnly(start, timeZone) : ''})?\nResponda "sim" para confirmar ou "nao" para cancelar.`
+        );
+        return;
+      }
+
+      const lista = formatEventsList(events, timeZone);
+      await replyToMessage(message, `Encontrei varios eventos. Seja mais especifico:\n${lista}`);
+    } catch (error) {
+      console.error('Erro ao buscar eventos para cancelar:', error);
+      await replyToMessage(message, 'Nao consegui buscar o evento para cancelar.');
+    }
     return;
   }
 

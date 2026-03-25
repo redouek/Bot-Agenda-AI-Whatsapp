@@ -12,6 +12,7 @@ export GEMINI_MODEL=$(jq --raw-output '.GEMINI_MODEL' "$OPTIONS")
 export DEFAULT_TIMEZONE=$(jq --raw-output '.DEFAULT_TIMEZONE' "$OPTIONS")
 export FOOTBALL_DATA_KEY=$(jq --raw-output '.FOOTBALL_DATA_KEY' "$OPTIONS")
 export GOOGLE_IMPERSONATE_EMAIL=$(jq --raw-output '.GOOGLE_IMPERSONATE_EMAIL' "$OPTIONS")
+export REMINDER_MINUTES=$(jq --raw-output '.REMINDER_MINUTES // 15' "$OPTIONS")
 
 # Sessão do WhatsApp persiste em /data para sobreviver a reinicializações
 export SESSION_PATH=/data/whatsapp-session

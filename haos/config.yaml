@@ -16,6 +16,7 @@ options:
   DEFAULT_TIMEZONE: "America/Sao_Paulo"
   FOOTBALL_DATA_KEY: ""
   GOOGLE_IMPERSONATE_EMAIL: ""
+  REMINDER_MINUTES: 15
 
 schema:
   GRUPO_ASSISTENTE_ID: str
@@ -26,6 +27,7 @@ schema:
   DEFAULT_TIMEZONE: str
   FOOTBALL_DATA_KEY: str
   GOOGLE_IMPERSONATE_EMAIL: str
+  REMINDER_MINUTES: int
 
 map:
   - data:rw

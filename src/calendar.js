@@ -67,10 +67,7 @@ export async function createEvent(data) {
   const event = {
     summary: data.summary || 'Evento WhatsApp',
     description: data.description || 'Criado pelo bot de WhatsApp',
-    start: {
-      dateTime: data.startDateTime,
-      timeZone,
-    },
+    start: { dateTime: data.startDateTime, timeZone },
     end: {
       dateTime: data.endDateTime || new Date(new Date(data.startDateTime).getTime() + 60 * 60 * 1000).toISOString(),
       timeZone,
@@ -78,11 +75,52 @@ export async function createEvent(data) {
     location: data.location || '',
   };
 
-  console.log('[calendar] Criando evento - summary:', event.summary);
-  const res = await client.events.insert({
-    calendarId,
-    requestBody: event,
-  });
+  if (data.recurrence) {
+    event.recurrence = Array.isArray(data.recurrence) ? data.recurrence : [data.recurrence];
+  }
 
+  console.log('[calendar] Criando evento - summary:', event.summary);
+  const res = await client.events.insert({ calendarId, requestBody: event });
   return res.data;
+}
+
+export async function listEvents(startDateTime, endDateTime) {
+  const client = await getCalendarClient();
+  const res = await client.events.list({
+    calendarId,
+    timeMin: startDateTime,
+    timeMax: endDateTime,
+    singleEvents: true,
+    orderBy: 'startTime',
+    maxResults: 20,
+  });
+  return res.data.items || [];
+}
+
+export async function searchEvents(query, daysAhead = 60) {
+  const client = await getCalendarClient();
+  const timeMin = new Date().toISOString();
+  const timeMax = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
+  const res = await client.events.list({
+    calendarId,
+    q: query,
+    timeMin,
+    timeMax,
+    singleEvents: true,
+    orderBy: 'startTime',
+    maxResults: 10,
+  });
+  return res.data.items || [];
+}
+
+export async function deleteEvent(eventId) {
+  const client = await getCalendarClient();
+  await client.events.delete({ calendarId, eventId });
+}
+
+export async function getUpcomingReminders(minutesAhead = 15) {
+  const now = new Date();
+  const future = new Date(now.getTime() + minutesAhead * 60 * 1000);
+  const items = await listEvents(now.toISOString(), future.toISOString());
+  return items.filter(e => e.start?.dateTime);
 }
