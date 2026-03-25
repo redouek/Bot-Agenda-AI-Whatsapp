@@ -423,9 +423,19 @@ async function processIncomingMessage(message) {
 
   if (plan.kind === 'cancel_event' && plan.cancel_event?.query) {
     try {
-      const events = await searchEvents(plan.cancel_event.query);
+      const rawQuery = plan.cancel_event.query;
+      const cleanQuery = rawQuery
+        .replace(/\b(no|na|do|da|de|o|a|os|as|um|uma)\b/gi, ' ')
+        .replace(/\b(sabado|domingo|segunda|terca|quarta|quinta|sexta|hoje|amanha|semana|mes|proximo|proxima)\b/gi, ' ')
+        .replace(/\s+/g, ' ').trim();
+      let events = await searchEvents(cleanQuery);
+      if (!events.length && cleanQuery !== rawQuery) events = await searchEvents(rawQuery);
       if (!events.length) {
-        await replyToMessage(message, `Nao encontrei nenhum evento com "${plan.cancel_event.query}".`);
+        const firstWord = cleanQuery.split(' ')[0];
+        if (firstWord && firstWord !== cleanQuery) events = await searchEvents(firstWord);
+      }
+      if (!events.length) {
+        await replyToMessage(message, `Nao encontrei nenhum evento com "${cleanQuery}".`);
         return;
       }
 
