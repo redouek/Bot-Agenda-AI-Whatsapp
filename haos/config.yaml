@@ -12,7 +12,7 @@ options:
   GOOGLE_API_KEY: ""
   GOOGLE_CALENDAR_ID: "primary"
   GOOGLE_SERVICE_ACCOUNT_KEY_JSON: "{}"
-  GEMINI_MODEL: "gemini-2.0-flash"
+  GEMINI_MODEL: "gemini-2.5-flash"
   DEFAULT_TIMEZONE: "America/Sao_Paulo"
   FOOTBALL_DATA_KEY: ""
   GOOGLE_IMPERSONATE_EMAIL: ""
