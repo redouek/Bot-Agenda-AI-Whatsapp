@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-gemini-calendar-bot",
-  "version": "0.1.0",
-  "description": "Bot de WhatsApp para agendar eventos no Google Calendar via Gemini API e rodar como Add-on Home Assistant.",
+  "version": "0.2.0",
+  "description": "Bot de WhatsApp para agendar eventos no Google Calendar via Gemini API. Distribuível via Docker.",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -10,9 +10,8 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "dotenv": "^16.3.1",
     "googleapis": "^131.0.0",
-    "qrcode-terminal": "^0.12.0",
+    "qrcode": "^1.5.4",
     "whatsapp-web.js": "^1.22.0"
   }
 }

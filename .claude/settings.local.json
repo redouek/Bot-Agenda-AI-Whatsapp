@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"qrcode$\")",
+      "Bash(node -e \"import\\(''node:http''\\).then\\(m => console.log\\(''http ok''\\)\\); import\\(''node:crypto''\\).then\\(m => console.log\\(''crypto ok''\\)\\);\")",
+      "Bash(node -e \"import\\(''qrcode''\\).then\\(m => console.log\\(''qrcode ok''\\)\\).catch\\(\\(\\) => console.log\\(''qrcode NOT installed''\\)\\)\")",
+      "Bash(npm install:*)",
+      "Bash(ls /c/Users/douek/Dropbox/Pessoal/Sites/agenda_IA_whats_DIST/*.json)",
+      "Bash(git check-ignore:*)"
+    ]
+  }
+}

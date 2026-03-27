@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WhatsApp Calendar Bot — Setup</title>
+  <link rel="stylesheet" href="/web/style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📅 WhatsApp Calendar Bot</h1>
+    </header>
+
+    <!-- Estado 1: Formulário de setup -->
+    <section id="section-setup" class="hidden">
+      <h2>Configuração inicial</h2>
+      <p class="hint">Preencha todos os campos e clique em Salvar. Depois conecte o Google Calendar.</p>
+
+      <form id="form-setup">
+        <fieldset>
+          <legend>WhatsApp</legend>
+          <label>
+            Seu número (self-chat ID)
+            <input type="text" name="GRUPO_ASSISTENTE_ID" placeholder="5511999999999@c.us" />
+            <span class="hint">Formato: DDI + DDD + número + @c.us</span>
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Gemini API</legend>
+          <label>
+            Chave da API Gemini (Google AI Studio)
+            <input type="text" name="GOOGLE_API_KEY" placeholder="AIza..." />
+          </label>
+          <label>
+            Modelo (opcional)
+            <input type="text" name="GEMINI_MODEL" placeholder="models/gemini-flash-latest" />
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Google Calendar — OAuth</legend>
+          <label>
+            Client ID do OAuth
+            <input type="text" name="GOOGLE_OAUTH_CLIENT_ID" placeholder="123456.apps.googleusercontent.com" />
+          </label>
+          <label>
+            Client Secret do OAuth
+            <input type="password" name="GOOGLE_OAUTH_CLIENT_SECRET" placeholder="GOCSPX-..." />
+          </label>
+          <label>
+            ID do Calendário
+            <input type="text" name="GOOGLE_CALENDAR_ID" placeholder="seuemail@gmail.com" />
+            <span class="hint">Use "primary" ou o e-mail da conta Google</span>
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Lembretes e extras</legend>
+          <label>
+            Minutos antes do lembrete
+            <input type="number" name="REMINDER_MINUTES" placeholder="15" min="1" max="120" />
+          </label>
+          <label>
+            Fuso horário
+            <input type="text" name="DEFAULT_TIMEZONE" placeholder="America/Sao_Paulo" />
+          </label>
+          <label>
+            Chave Football Data (opcional)
+            <input type="text" name="FOOTBALL_DATA_KEY" placeholder="Deixe em branco se não usar" />
+          </label>
+        </fieldset>
+
+        <div class="actions">
+          <button type="submit" class="btn-primary">Salvar configuração</button>
+        </div>
+        <p id="save-feedback" class="hidden feedback-ok">Salvo com sucesso!</p>
+      </form>
+
+      <hr />
+
+      <div id="oauth-section">
+        <h3>Google Calendar</h3>
+        <p id="calendar-status-msg">Aguardando configuração do Client ID e Secret acima.</p>
+        <button id="btn-oauth" class="btn-secondary" disabled>Conectar Google Calendar</button>
+        <p class="hint">
+          Crie as credenciais em <a href="https://console.cloud.google.com" target="_blank" rel="noopener" style="color:#25d366">console.cloud.google.com</a> → APIs &amp; Services → Credentials → OAuth 2.0 Client IDs.<br />
+          URI de redirecionamento autorizado: <code>http://localhost:3000/oauth/callback</code>
+        </p>
+      </div>
+    </section>
+
+    <!-- Estado 2: QR Code -->
+    <section id="section-qr" class="hidden">
+      <h2>Escaneie o QR code</h2>
+      <p>Abra o WhatsApp no celular → Dispositivos conectados → Conectar dispositivo → aponte para o QR abaixo.</p>
+      <div id="qr-container">
+        <p class="loading">Carregando QR code...</p>
+      </div>
+      <p class="hint">O QR code se renova automaticamente a cada ~20 segundos.</p>
+    </section>
+
+    <!-- Estado 3: Dashboard -->
+    <section id="section-ready" class="hidden">
+      <h2>Bot rodando</h2>
+      <div class="status-grid">
+        <div class="status-item ok">
+          <span class="status-icon">✅</span>
+          <span>WhatsApp conectado</span>
+        </div>
+        <div id="status-calendar" class="status-item">
+          <span class="status-icon" id="calendar-icon">⏳</span>
+          <span id="calendar-label">Verificando Google Calendar...</span>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:2rem">
+        <button class="btn-secondary" onclick="showSetup()">Reconfigurar</button>
+      </div>
+    </section>
+
+    <!-- Estado de erro/desconectado -->
+    <section id="section-disconnected" class="hidden">
+      <h2>Bot desconectado</h2>
+      <p>O WhatsApp foi desconectado. Reinicie o container ou <button class="btn-link" onclick="location.reload()">recarregue a página</button>.</p>
+    </section>
+
+    <footer>
+      <p>Status: <span id="status-label">Verificando...</span></p>
+      <p style="margin-top:.4rem"><a href="/tutorial" target="_blank" style="color:#25d366;font-size:.82rem">📖 Tutorial de instalação</a></p>
+    </footer>
+  </div>
+
+  <script src="/web/app.js"></script>
+</body>
+</html>

@@ -1,8 +1,19 @@
 node_modules
 .env
+
+# Dados persistidos (config, tokens OAuth, sessão WhatsApp)
+data/
+tmp/
+
+# Sessão whatsapp-web.js (caminhos alternativos)
 .session
 **/session.json
 **/browser/*
 **/.cache
-.DS_Store
+
+# Credenciais de service account (legado)
 agenda-ai-red-*.json
+*-service-account*.json
+
+.DS_Store
+Thumbs.db

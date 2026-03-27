@@ -1,13 +1,8 @@
-import dotenv from 'dotenv';
+import { getConfig } from './config.js';
 
-dotenv.config();
-
-const FOOTBALL_DATA_KEY = process.env.FOOTBALL_DATA_KEY;
-const FOOTBALL_DATA_BASE_URL = process.env.FOOTBALL_DATA_BASE_URL || 'https://api.football-data.org/v4';
-const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+const FOOTBALL_DATA_BASE_URL = 'https://api.football-data.org/v4';
 
 // Mapa: nome exato da API (inglês) → { pt: nome em português, flag: emoji }
-// Usado para traduzir e adicionar bandeira ao título do evento
 const NATIONAL_TEAMS = {
   'Brazil':              { pt: 'Brasil',           flag: '🇧🇷' },
   'Argentina':           { pt: 'Argentina',         flag: '🇦🇷' },
@@ -79,14 +74,12 @@ const NATIONAL_TEAMS = {
   'Dominican Republic':  { pt: 'República Dominicana', flag: '🇩🇴' },
 };
 
-// Traduz nome da API para PT e retorna flag. Se não for seleção, retorna só o nome.
 function resolveApiTeamName(apiName = '') {
   const entry = NATIONAL_TEAMS[apiName];
   if (entry) return { name: entry.pt, flag: entry.flag };
   return { name: apiName, flag: '' };
 }
 
-// Para WhatsApp — 🇧🇷 Brasil (mandante) / Argentina 🇦🇷 (visitante)
 function formatHome(apiName) {
   const { name, flag } = resolveApiTeamName(apiName);
   return flag ? `${flag} ${name}` : name;
@@ -97,14 +90,11 @@ function formatAway(apiName) {
   return flag ? `${name} ${flag}` : name;
 }
 
-// Para Google Calendar — só o nome em PT (sem emoji, que vira letras no Calendar)
 function formatCalendarName(apiName) {
   const { name } = resolveApiTeamName(apiName);
   return name;
 }
 
-// Mapeamento de nomes em PT para IDs conhecidos na football-data.org
-// Evita depender do endpoint de busca (que pode ser restrito no plano free)
 const KNOWN_TEAM_IDS = {
   'brazil': 764,
   'brasil': 764,
@@ -165,7 +155,8 @@ async function fetchJson(url, options = {}) {
   }
 }
 
-function formatDateTime(dateValue, timeZone = DEFAULT_TIMEZONE) {
+function formatDateTime(dateValue) {
+  const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return dateValue;
 
@@ -187,13 +178,11 @@ function resolveTeam(query) {
   const lower = query.trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-  // Tenta match exato primeiro
   for (const [key, id] of Object.entries(KNOWN_TEAM_IDS)) {
     const normKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (normKey === lower) return { id, name: key };
   }
 
-  // Tenta match parcial
   for (const [key, id] of Object.entries(KNOWN_TEAM_IDS)) {
     const normKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (normKey.includes(lower) || lower.includes(normKey)) return { id, name: key };
@@ -203,27 +192,23 @@ function resolveTeam(query) {
 }
 
 async function searchTeamByName(query) {
-  if (!FOOTBALL_DATA_KEY) throw new Error('Configure FOOTBALL_DATA_KEY no .env.');
+  const key = getConfig().FOOTBALL_DATA_KEY;
+  if (!key) throw new Error('Configure FOOTBALL_DATA_KEY no painel de setup.');
 
   const url = `${FOOTBALL_DATA_BASE_URL}/teams?search=${encodeURIComponent(query)}&limit=5`;
-  const json = await fetchJson(url, {
-    headers: { 'X-Auth-Token': FOOTBALL_DATA_KEY },
-  });
-
+  const json = await fetchJson(url, { headers: { 'X-Auth-Token': key } });
   return json?.teams?.[0] || null;
 }
 
 async function getUpcomingMatches(teamId) {
-  if (!FOOTBALL_DATA_KEY) throw new Error('Configure FOOTBALL_DATA_KEY no .env.');
+  const key = getConfig().FOOTBALL_DATA_KEY;
+  if (!key) throw new Error('Configure FOOTBALL_DATA_KEY no painel de setup.');
 
   const today = new Date().toISOString().split('T')[0];
   const until = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   const url = `${FOOTBALL_DATA_BASE_URL}/teams/${teamId}/matches?status=SCHEDULED&dateFrom=${today}&dateTo=${until}&limit=5`;
-  const json = await fetchJson(url, {
-    headers: { 'X-Auth-Token': FOOTBALL_DATA_KEY },
-  });
-
+  const json = await fetchJson(url, { headers: { 'X-Auth-Token': key } });
   return json?.matches || [];
 }
 
@@ -241,6 +226,7 @@ function matchToCalendarEvent(match) {
   const home = formatHome(match.homeTeam?.name || 'Time da casa');
   const away = formatAway(match.awayTeam?.name || 'Visitante');
   const competition = match.competition?.name || '';
+  const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
 
   return {
     summary: `${home} x ${away}`,
@@ -248,17 +234,15 @@ function matchToCalendarEvent(match) {
     startDateTime: startDate.toISOString(),
     endDateTime: endDate.toISOString(),
     location: match.venue || '',
-    timeZone: DEFAULT_TIMEZONE,
+    timeZone,
   };
 }
 
 async function lookupFootball(query) {
-  // 1. Tenta resolver pelo mapa de times conhecidos
   const known = resolveTeam(query);
   let teamId = known?.id;
   let teamName = known?.name || query;
 
-  // 2. Se não encontrou no mapa, tenta busca na API
   if (!teamId) {
     console.log('[football] Time não encontrado no mapa, buscando na API:', query);
     const found = await searchTeamByName(query);

@@ -1,16 +1,23 @@
-import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getConfig } from './config.js';
 
-dotenv.config();
+let _aiClient = null;
+let _model = null;
+let _cachedApiKey = null;
 
-const API_KEY = process.env.GOOGLE_API_KEY;
-if (!API_KEY) {
-  console.warn('Aviso: configure GOOGLE_API_KEY no .env para Gemini');
+function getModel() {
+  const { GOOGLE_API_KEY, GEMINI_MODEL } = getConfig();
+  const modelName = GEMINI_MODEL || 'models/gemini-flash-latest';
+
+  if (!GOOGLE_API_KEY) throw new Error('GOOGLE_API_KEY não configurado. Acesse o painel de setup.');
+
+  if (_model && _cachedApiKey === GOOGLE_API_KEY) return _model;
+
+  _aiClient = new GoogleGenerativeAI(GOOGLE_API_KEY);
+  _model = _aiClient.getGenerativeModel({ model: modelName });
+  _cachedApiKey = GOOGLE_API_KEY;
+  return _model;
 }
-
-const aiClient = new GoogleGenerativeAI(API_KEY || '');
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'models/gemini-flash-latest';
-const model = aiClient.getGenerativeModel({ model: GEMINI_MODEL });
 
 function extractJsonObject(text) {
   const firstBrace = text.indexOf('{');
@@ -65,16 +72,15 @@ function normalizeEvent(event, fallbackText = '') {
   let endDateTime = toISOStringSafe(event.endDateTime)
     || new Date(new Date(startDateTime).getTime() + 60 * 60 * 1000).toISOString();
 
-  // Corrige inversão: se o Gemini colocou o horário do usuário no endDateTime
-  // e o startDateTime ficou no passado ou muito antes, troca os dois
   const now = Date.now();
   const startMs = new Date(startDateTime).getTime();
   const endMs = new Date(endDateTime).getTime();
   if (startMs < now && endMs > now && endMs > startMs) {
-    // startDateTime parece errado (no passado), endDateTime parece ser o horário real
     startDateTime = endDateTime;
     endDateTime = new Date(endMs + 60 * 60 * 1000).toISOString();
   }
+
+  const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
 
   return {
     summary: event.summary,
@@ -85,7 +91,7 @@ function normalizeEvent(event, fallbackText = '') {
       : new Date(new Date(startDateTime).getTime() + 60 * 60 * 1000).toISOString(),
     location: event.location || '',
     locationSuggestion: event.locationSuggestion || '',
-    timeZone: event.timeZone || process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo',
+    timeZone: event.timeZone || timeZone,
   };
 }
 
@@ -112,13 +118,13 @@ function fallbackScheduleProposal(text) {
       endDateTime: dateParts.endDateTime,
       location: '',
       locationSuggestion: '',
-      timeZone: process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo',
+      timeZone: getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo',
     },
   };
 }
 
 function buildPrompt({ history, pendingAction, userText, mediaKind }) {
-  const timeZone = process.env.DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+  const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
   const now = new Date();
   const todayLocal = now.toLocaleString('pt-BR', { timeZone, hour12: false })
     + ` (${timeZone}, UTC-3)`;
@@ -154,6 +160,7 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
 }
 
 async function generateJson(parts) {
+  const model = getModel();
   const result = await model.generateContent(parts);
   const raw = result?.response?.text?.() || '';
   return extractJsonObject(raw) || { kind: 'none', reply: '', requiresConfirmation: false };
@@ -235,9 +242,7 @@ export async function planConversationTurn({ message, type, text, history = [], 
   }
 
   const fallback = fallbackScheduleProposal(userText);
-  if (fallback) {
-    return fallback;
-  }
+  if (fallback) return fallback;
 
   return {
     kind: 'chat',
