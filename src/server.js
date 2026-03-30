@@ -80,7 +80,7 @@ async function handleRequest(req, res) {
     const body = await readBody(req);
     const allowed = [
       'GRUPO_ASSISTENTE_ID', 'GOOGLE_API_KEY', 'GOOGLE_CALENDAR_ID',
-      'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
+      'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET', 'OAUTH_REDIRECT_URI',
       'FOOTBALL_DATA_KEY', 'REMINDER_MINUTES', 'DEFAULT_TIMEZONE', 'GEMINI_MODEL',
     ];
     const update = {};

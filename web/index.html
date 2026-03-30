@@ -54,6 +54,11 @@
             <input type="text" name="GOOGLE_CALENDAR_ID" placeholder="seuemail@gmail.com" />
             <span class="hint">Use "primary" ou o e-mail da conta Google</span>
           </label>
+          <label>
+            URL de redirecionamento OAuth
+            <input type="text" name="OAUTH_REDIRECT_URI" placeholder="http://localhost:3000/oauth/callback" />
+            <span class="hint">Local: <code>http://localhost:3000/oauth/callback</code> — VPS: <code>http://IP_DO_SERVIDOR:3000/oauth/callback</code></span>
+          </label>
         </fieldset>
 
         <fieldset>
@@ -86,7 +91,7 @@
         <button id="btn-oauth" class="btn-secondary" disabled>Conectar Google Calendar</button>
         <p class="hint">
           Crie as credenciais em <a href="https://console.cloud.google.com" target="_blank" rel="noopener" style="color:#25d366">console.cloud.google.com</a> → APIs &amp; Services → Credentials → OAuth 2.0 Client IDs.<br />
-          URI de redirecionamento autorizado: <code>http://localhost:3000/oauth/callback</code>
+          Adicione a URL de redirecionamento acima nas credenciais do Google Cloud.
         </p>
       </div>
     </section>

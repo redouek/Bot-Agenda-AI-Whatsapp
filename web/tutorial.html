@@ -328,12 +328,21 @@
         <li>Clique em <strong>+ Create Credentials → OAuth 2.0 Client IDs</strong>.</li>
         <li>Em <em>Application type</em>, escolha <strong>Web application</strong>.</li>
         <li>
-          Em <strong>Authorized redirect URIs</strong>, clique em <em>Add URI</em> e cole exatamente:
-          <div class="code-block">http://localhost:3000/oauth/callback</div>
+          Em <strong>Authorized redirect URIs</strong>, clique em <em>Add URI</em> e cole a URL correspondente à sua instalação:
+          <div class="code-block">
+            # Instalação local (computador):<br />
+            http://localhost:3000/oauth/callback<br /><br />
+            # Instalação em VPS (substitua pelo IP ou domínio do servidor):<br />
+            http://IP_DO_SERVIDOR:3000/oauth/callback
+          </div>
         </li>
         <li>Clique em <strong>Create</strong>.</li>
         <li>Copie o <strong>Client ID</strong> e o <strong>Client Secret</strong> exibidos.</li>
       </ol>
+    </div>
+
+    <div class="tip">
+      No painel de configuração (Passo 6), preencha o campo <strong>URL de redirecionamento OAuth</strong> com a mesma URL que você cadastrou aqui. Para instalação local, o valor padrão já está correto.
     </div>
 
     <div class="success">

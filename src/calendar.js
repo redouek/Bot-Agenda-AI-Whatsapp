@@ -13,7 +13,7 @@ function getOAuthClient() {
     throw new Error('Configure GOOGLE_OAUTH_CLIENT_ID e GOOGLE_OAUTH_CLIENT_SECRET no painel de setup.');
   }
 
-  const redirectUri = process.env.OAUTH_REDIRECT_URI || 'http://localhost:3000/oauth/callback';
+  const redirectUri = getConfig().OAUTH_REDIRECT_URI || process.env.OAUTH_REDIRECT_URI || 'http://localhost:3000/oauth/callback';
 
   return new google.auth.OAuth2(
     GOOGLE_OAUTH_CLIENT_ID,

@@ -155,11 +155,17 @@ async function getRecentHistory(chat, currentMessageId) {
 
 async function replyToMessage(message, text) {
   if (!text) return;
+  const CHAT_ID = getConfig().GRUPO_ASSISTENTE_ID;
   try {
     trackBotSentBody(text);
-    await message.reply(text);
+    await client.sendMessage(CHAT_ID, text);
   } catch (error) {
-    console.error('Falha ao enviar reply', error);
+    console.error('Falha ao enviar mensagem via sendMessage:', error?.message);
+    try {
+      await message.reply(text);
+    } catch (err2) {
+      console.error('Falha também no fallback reply:', err2?.message);
+    }
   }
 }
 
