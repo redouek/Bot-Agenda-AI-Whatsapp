@@ -392,6 +392,47 @@ export function startSelfChatPolling(userId, client) {
 
   let lastSeenTs = Date.now() - 60000;
 
+  // Diagnóstico completo do store — executado UMA vez no início
+  let diagDone = false;
+  const diagStore = async () => {
+    if (diagDone) return;
+    diagDone = true;
+    const info = await client.pupPage.evaluate(() => {
+      try {
+        const Store = window.Store;
+        const storeKeys = Object.keys(Store).sort();
+        const connWid = Store.Conn?.wid?._serialized;
+        const connWidUser = Store.Conn?.wid?.user;
+        const allChats = Store.Chat?.getModelsArray() || [];
+        const atCus = allChats.filter(c => c.id?._serialized?.includes('@c.us')).map(c => c.id._serialized);
+        const atSNet = allChats.filter(c => c.id?._serialized?.includes('@s.whatsapp.net')).map(c => c.id._serialized);
+
+        // Tentar carregar self-chat via Chat.find()
+        let findResult = null;
+        try {
+          const wid = Store.WidFactory?.createWid(connWid);
+          const found = Store.Chat.get(wid);
+          findResult = found ? found.id._serialized : 'not found via get()';
+        } catch (e) { findResult = 'error: ' + e.message; }
+
+        // Ver se Store tem StarredMsg, SelfMsg, etc
+        const specialStores = ['StarredMsg', 'SelfMsg', 'Msg', 'MsgKey', 'SyncedMsg'].filter(k => k in Store);
+
+        return {
+          storeKeys: storeKeys.slice(0, 50),
+          connWid,
+          connWidUser,
+          totalChats: allChats.length,
+          atCus,
+          atSNet: atSNet.slice(0, 5),
+          findResult,
+          specialStores,
+        };
+      } catch (e) { return { error: e.message }; }
+    });
+    console.log('[poll:diag] Store info:', JSON.stringify(info, null, 2));
+  };
+
   // Busca o self-chat diretamente do store interno do WA Web (bypassa getChats())
   const fetchFromStore = async (phone) => {
     return client.pupPage.evaluate((phoneNumber) => {
@@ -439,6 +480,8 @@ export function startSelfChatPolling(userId, client) {
 
   const interval = setInterval(async () => {
     try {
+      await diagStore();
+
       const CHAT_ID = await getAssistantChatId(userId);
       if (!CHAT_ID) return;
 
