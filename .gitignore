@@ -1,5 +1,6 @@
 node_modules
 .env
+bot.env
 
 # Dados persistidos (config, tokens OAuth, sessão WhatsApp)
 data/

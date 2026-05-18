@@ -2,6 +2,7 @@ node_modules
 npm-debug.log
 .git
 .env
+bot.env
 data
 tmp
 .session
