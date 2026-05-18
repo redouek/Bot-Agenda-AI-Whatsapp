@@ -446,9 +446,18 @@ export function startSelfChatPolling(userId, client) {
     });
   };
 
+  let lastReportedCount = -1;
   const logSummary = (result) => {
-    if (logTick++ % 5 === 0) {
+    const currentCount = Math.max(result.chatMsgsCount || 0, result.selfChatMsgsInStore || 0);
+    // Log sempre que mudar a contagem, ou a cada 10 ticks
+    if (currentCount !== lastReportedCount || logTick++ % 10 === 0) {
+      lastReportedCount = currentCount;
       console.log(`[poll:${userId}] userLid=${result.userLid} chatId=${result.chatId} chatMsgs=${result.chatMsgsCount} selfMsgs=${result.selfChatMsgsInStore} totalStore=${result.totalStoreMsgs}`);
+      if (result.messages?.length) {
+        console.log(`[poll:${userId}] mensagens no self-chat:`, JSON.stringify(result.messages.map(m => ({
+          ts: m.timestamp, age: Math.floor((Date.now()/1000 - m.timestamp)) + 's', fromMe: m.fromMe, body: m.body?.slice(0, 60)
+        })), null, 2));
+      }
     }
   };
 
