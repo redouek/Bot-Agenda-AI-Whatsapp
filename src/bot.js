@@ -392,6 +392,49 @@ export function startSelfChatPolling(userId, client) {
 
   let lastSeenTs = Date.now() - 60000;
 
+  // Diagnóstico único para entender a estrutura do store
+  let diagDone = false;
+  const runDiag = async (phone) => {
+    if (diagDone) return;
+    diagDone = true;
+    const d = await client.pupPage.evaluate(async (ph) => {
+      const S = window.Store;
+      // Estrutura do Conn (WID real)
+      const connMe = S.Conn?.me?._serialized;
+      const connMeUser = S.Conn?.me?.user;
+      const connKeys = Object.keys(S.Conn || {}).filter(k => typeof S.Conn[k] !== 'function').slice(0, 15);
+
+      // Tipo e métodos de FindOrCreateChat
+      const fncType = typeof S.FindOrCreateChat;
+      const fncKeys = fncType === 'object' ? Object.keys(S.FindOrCreateChat).slice(0, 10) : [];
+
+      // Testar FindOrCreateChat explicitamente com log de erro
+      let fncResult = null;
+      for (const fmt of [ph + '@c.us', ph + '@s.whatsapp.net', connMe].filter(Boolean)) {
+        try {
+          const wid = S.WidFactory.createWid(fmt);
+          const chat = await S.FindOrCreateChat.findOrCreateChat(wid);
+          fncResult = chat ? { ok: true, chatId: chat.id._serialized } : { ok: false, fmt };
+          if (chat) break;
+        } catch (e) { fncResult = { error: e.message, fmt }; }
+      }
+
+      // Tipo e primeiras chaves de Store.Msg
+      const msgKeys = S.Msg ? Object.keys(S.Msg).slice(0, 15) : null;
+
+      // Store.Chat.find (vs .get)
+      let chatFindResult = null;
+      try {
+        const wid = S.WidFactory.createWid(ph + '@c.us');
+        const c = S.Chat.find ? await S.Chat.find(wid) : 'no find method';
+        chatFindResult = c ? (c.id ? c.id._serialized : String(c)) : 'null';
+      } catch (e) { chatFindResult = 'error: ' + e.message; }
+
+      return { connMe, connMeUser, connKeys, fncType, fncKeys, fncResult, msgKeys, chatFindResult };
+    }, phone);
+    console.log('[poll:diag2]', JSON.stringify(d, null, 2));
+  };
+
   // Usa FindOrCreateChat para forçar o WA Web a carregar o self-chat,
   // mesmo que ele não apareça em getChats() no modo multi-device.
   const fetchFromStore = async (phone) => {
@@ -449,6 +492,7 @@ export function startSelfChatPolling(userId, client) {
       if (!CHAT_ID) return;
 
       const phone = CHAT_ID.split('@')[0];
+      await runDiag(phone);
       const result = await fetchFromStore(phone);
 
       if (!result?.chatId) {
