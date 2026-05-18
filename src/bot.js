@@ -392,86 +392,46 @@ export function startSelfChatPolling(userId, client) {
 
   let lastSeenTs = Date.now() - 60000;
 
-  // Acessa o self-chat via Store.Chat.find(wid) — o único método que funciona
-  // para Mensagens Salvas no modo multi-device. Força o carregamento das mensagens
-  // antes de ler, pois Chat.find retorna apenas metadados do chat.
+  // Acessa o self-chat no modo multi-device.
+  // O Mensagens Salvas usa o LID do próprio usuário como chat ID (não @c.us).
+  // Descobrimos o LID dinamicamente a partir de qualquer mensagem fromMe.
   let logTick = 0;
-  const fetchFromStore = async (phone) => {
-    return client.pupPage.evaluate(async (phoneNumber) => {
+  const fetchFromStore = async () => {
+    return client.pupPage.evaluate(async () => {
       try {
         const Store = window.Store;
-        const wid = Store.WidFactory.createWid(phoneNumber + '@c.us');
-        const chat = await Store.Chat.find(wid);
+        const allMsgs = Store.Msg?.getModelsArray?.() || [];
 
-        if (!chat || !chat.id) {
-          return { error: 'Chat.find retornou vazio' };
+        // Descobre o LID do próprio usuário a partir de uma fromMe message
+        const fromMeMsg = allMsgs.find(m => m.id?.fromMe && m.from?._serialized?.endsWith('@lid'));
+        const userLid = fromMeMsg?.from?._serialized;
+
+        if (!userLid) {
+          return { error: 'LID do usuario nao encontrado em Store.Msg' };
         }
 
-        // Força o carregamento das mensagens via Store.ConversationMsgs ou loadEarlierMsgs
-        let loadMethod = 'none';
-        let loadResult = null;
+        // Self-chat REAL: mensagens cujo remote === user LID
+        const selfChatMsgs = allMsgs.filter(m => m.id?.remote?._serialized === userLid);
+
+        // Tenta achar o chat via Chat.find com o LID
+        let chat = null;
         try {
-          if (typeof chat.loadEarlierMsgs === 'function') {
-            await chat.loadEarlierMsgs();
-            loadMethod = 'chat.loadEarlierMsgs';
-          } else if (Store.ConversationMsgs?.loadEarlierMsgs) {
-            await Store.ConversationMsgs.loadEarlierMsgs(chat);
-            loadMethod = 'Store.ConversationMsgs.loadEarlierMsgs';
-          } else if (Store.ConversationMsgs?.loadAroundPlaytailMsgs) {
-            await Store.ConversationMsgs.loadAroundPlaytailMsgs(chat);
-            loadMethod = 'loadAroundPlaytailMsgs';
-          }
-        } catch (e) { loadResult = e.message; }
-
-        const msgs = chat.msgs?.getModelsArray?.() || [];
-
-        // Também busca em Store.Msg (mais abrangente)
-        let storeMsgCount = 0;
-        let storeMsgsForChat = [];
-        let sampleMsgs = [];
-        try {
-          if (Store.Msg?.getModelsArray) {
-            const allMsgs = Store.Msg.getModelsArray();
-            storeMsgCount = allMsgs.length;
-            const targetChatId = chat.id._serialized;
-            const targetUser = chat.id.user;
-
-            // Tenta múltiplas formas de identificar mensagens do self-chat
-            storeMsgsForChat = allMsgs
-              .filter(m => {
-                const remote = m.id?.remote?._serialized;
-                const to = m.to?._serialized;
-                const from = m.from?._serialized;
-                const idStr = m.id?._serialized || '';
-                return remote === targetChatId || to === targetChatId || from === targetChatId
-                  || m.id?.remote?.user === targetUser
-                  || idStr.includes('_' + targetChatId + '_');
-              })
-              .slice(-15);
-
-            // Pega amostra das últimas 5 msgs do store (todas, não filtradas) para debug
-            sampleMsgs = allMsgs.slice(-5).map(m => ({
-              idSer: m.id?._serialized || '',
-              remote: m.id?.remote?._serialized,
-              to: m.to?._serialized,
-              from: m.from?._serialized,
-              fromMe: m.id?.fromMe,
-              body: (m.body || '').slice(0, 30),
-            }));
-          }
+          const wid = Store.WidFactory.createWid(userLid);
+          chat = await Store.Chat.find(wid);
         } catch {}
 
-        const useMsgs = msgs.length > 0 ? msgs : storeMsgsForChat;
+        const chatMsgs = chat?.msgs?.getModelsArray?.() || [];
+
+        // Usa a fonte que tiver mais mensagens
+        const useMsgs = chatMsgs.length >= selfChatMsgs.length ? chatMsgs : selfChatMsgs;
         const recent = useMsgs.slice(-15);
 
         return {
-          chatId: chat.id._serialized,
-          chatMsgsCount: msgs.length,
-          storeMsgCount,
-          storeMsgsForChatCount: storeMsgsForChat.length,
-          loadMethod,
-          loadResult,
-          sampleMsgs,
+          chatId: chat?.id?._serialized || userLid,
+          userLid,
+          chatMsgsCount: chatMsgs.length,
+          selfChatMsgsInStore: selfChatMsgs.length,
+          totalStoreMsgs: allMsgs.length,
           messages: recent.map(m => ({
             id: m.id?._serialized || '',
             body: m.body || '',
@@ -483,15 +443,12 @@ export function startSelfChatPolling(userId, client) {
       } catch (e) {
         return { error: e.message };
       }
-    }, phone);
+    });
   };
 
   const logSummary = (result) => {
     if (logTick++ % 5 === 0) {
-      console.log(`[poll:${userId}] chat=${result.chatId} chatMsgs=${result.chatMsgsCount} storeMsgs=${result.storeMsgCount} forChat=${result.storeMsgsForChatCount} load=${result.loadMethod}`);
-      if (result.sampleMsgs?.length) {
-        console.log(`[poll:${userId}] amostra das ultimas msgs do store:`, JSON.stringify(result.sampleMsgs, null, 2));
-      }
+      console.log(`[poll:${userId}] userLid=${result.userLid} chatId=${result.chatId} chatMsgs=${result.chatMsgsCount} selfMsgs=${result.selfChatMsgsInStore} totalStore=${result.totalStoreMsgs}`);
     }
   };
 
@@ -500,8 +457,7 @@ export function startSelfChatPolling(userId, client) {
       const CHAT_ID = await getAssistantChatId(userId);
       if (!CHAT_ID) return;
 
-      const phone = CHAT_ID.split('@')[0];
-      const result = await fetchFromStore(phone);
+      const result = await fetchFromStore();
 
       if (!result?.chatId) {
         console.log(`[poll:${userId}] Store result:`, JSON.stringify(result));
