@@ -390,28 +390,58 @@ export function startSelfChatPolling(userId, client) {
 
   let lastSeenTs = Date.now() - 60000;
 
-  let debugTick = 0;
-  const interval = setInterval(async () => {
+  // Resolve the self-chat ID once after a short delay (client.info available after ready)
+  let resolvedChatId = null;
+
+  const resolveSelfChatId = async () => {
     try {
       const CHAT_ID = await getAssistantChatId(userId);
-      if (!CHAT_ID) {
-        if (debugTick++ % 15 === 0) console.log(`[poll:${userId}] CHAT_ID nao encontrado no banco`);
-        return;
+      if (!CHAT_ID) return null;
+
+      const chats = await client.getChats();
+
+      // 1. Exact match (old @c.us format or already resolved @lid)
+      let found = chats.find(c => c.id._serialized === CHAT_ID);
+
+      // 2. Match by phone number part (handles @c.us stored vs @lid in chat list)
+      if (!found) {
+        const phone = CHAT_ID.split('@')[0];
+        found = chats.find(c => c.id.user === phone);
+      }
+
+      // 3. Self-chat via client.info.wid (Mensagens Salvas / Saved Messages)
+      if (!found) {
+        const selfWid = client.info?.wid?._serialized;
+        console.log(`[poll:${userId}] Tentando client.info.wid=${selfWid} CHAT_ID=${CHAT_ID}`);
+        if (selfWid) found = chats.find(c => c.id._serialized === selfWid);
+      }
+
+      if (found) {
+        console.log(`[poll:${userId}] Self-chat resolvido: ${found.id._serialized}`);
+        return found.id._serialized;
+      }
+
+      console.log(`[poll:${userId}] Self-chat NAO encontrado. CHAT_ID=${CHAT_ID} wid=${client.info?.wid?._serialized} primeiros IDs:`, chats.slice(0, 8).map(c => c.id._serialized));
+      return null;
+    } catch (err) {
+      console.warn(`[poll:${userId}] Erro ao resolver self-chat:`, err?.message);
+      return null;
+    }
+  };
+
+  const interval = setInterval(async () => {
+    try {
+      // Resolve once, reuse thereafter
+      if (!resolvedChatId) {
+        resolvedChatId = await resolveSelfChatId();
+        if (!resolvedChatId) return;
       }
 
       const chats = await client.getChats();
-      const chat = chats.find(c => c.id._serialized === CHAT_ID);
-      if (debugTick++ % 15 === 0) {
-        console.log(`[poll:${userId}] CHAT_ID=${CHAT_ID} chats=${chats.length} encontrado=${!!chat}`);
-        if (!chat) {
-          const selfChats = chats.filter(c => c.id._serialized.includes('@c.us') && c.id._serialized === c.id.user + '@c.us');
-          console.log(`[poll:${userId}] IDs dos primeiros 5 chats:`, chats.slice(0,5).map(c => c.id._serialized));
-        }
-      }
-      if (!chat) return;
+      const chat = chats.find(c => c.id._serialized === resolvedChatId);
+      if (!chat) { resolvedChatId = null; return; } // reset so it re-resolves next tick
 
       const messages = await chat.fetchMessages({ limit: 5 });
-      if (debugTick % 15 === 1) console.log(`[poll:${userId}] fetchMessages=${messages.length} lastSeenTs=${lastSeenTs}`);
 
       for (const message of messages) {
         const msgTs = (message.timestamp || 0) * 1000;
