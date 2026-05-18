@@ -384,75 +384,110 @@ export function stopReminderLoop(userId) {
 }
 
 // Polling de mensagens — workaround para message_create não disparar no self-chat
-// em modo multi-device do whatsapp-web.js
+// em modo multi-device do whatsapp-web.js.
+// Acessa o store interno do WA via pupPage.evaluate() porque getChats() não expõe
+// o self-chat (Mensagens Salvas) no modo multi-device (@lid).
 export function startSelfChatPolling(userId, client) {
   if (pollIntervals.has(userId)) return;
 
   let lastSeenTs = Date.now() - 60000;
 
-  // Resolve the self-chat ID once after a short delay (client.info available after ready)
-  let resolvedChatId = null;
+  // Busca o self-chat diretamente do store interno do WA Web (bypassa getChats())
+  const fetchFromStore = async (phone) => {
+    return client.pupPage.evaluate((phoneNumber) => {
+      try {
+        const Store = window.Store;
+        if (!Store?.Chat) return { error: 'Store.Chat indisponivel' };
 
-  const resolveSelfChatId = async () => {
-    try {
-      const CHAT_ID = await getAssistantChatId(userId);
-      if (!CHAT_ID) return null;
+        const allChats = Store.Chat.getModelsArray();
 
-      const chats = await client.getChats();
+        // Tenta encontrar o self-chat por diferentes critérios
+        let selfChat =
+          // 1. contact.isMe = true (Mensagens Salvas)
+          allChats.find(c => { try { return c.contact?.isMe; } catch { return false; } }) ||
+          // 2. id.user bate com o número de telefone
+          allChats.find(c => c.id?.user === phoneNumber) ||
+          // 3. serialized exato @c.us
+          allChats.find(c => c.id?._serialized === phoneNumber + '@c.us') ||
+          // 4. serialized exato @s.whatsapp.net
+          allChats.find(c => c.id?._serialized === phoneNumber + '@s.whatsapp.net');
 
-      // 1. Exact match (old @c.us format or already resolved @lid)
-      let found = chats.find(c => c.id._serialized === CHAT_ID);
+        if (!selfChat) {
+          return {
+            error: 'self-chat nao encontrado',
+            sample: allChats.slice(0, 10).map(c => c.id?._serialized),
+          };
+        }
 
-      // 2. Match by phone number part (handles @c.us stored vs @lid in chat list)
-      if (!found) {
-        const phone = CHAT_ID.split('@')[0];
-        found = chats.find(c => c.id.user === phone);
+        const msgs = selfChat.msgs?.getModelsArray?.() || [];
+        const recent = msgs.slice(-15);
+        return {
+          chatId: selfChat.id._serialized,
+          messages: recent.map(m => ({
+            id: m.id?._serialized || '',
+            body: m.body || '',
+            timestamp: m.t || 0,
+            fromMe: m.id?.fromMe ?? false,
+            type: m.type || 'chat',
+          })),
+        };
+      } catch (e) {
+        return { error: e.message };
       }
-
-      // 3. Self-chat via client.info.wid (Mensagens Salvas / Saved Messages)
-      if (!found) {
-        const selfWid = client.info?.wid?._serialized;
-        console.log(`[poll:${userId}] Tentando client.info.wid=${selfWid} CHAT_ID=${CHAT_ID}`);
-        if (selfWid) found = chats.find(c => c.id._serialized === selfWid);
-      }
-
-      if (found) {
-        console.log(`[poll:${userId}] Self-chat resolvido: ${found.id._serialized}`);
-        return found.id._serialized;
-      }
-
-      console.log(`[poll:${userId}] Self-chat NAO encontrado. CHAT_ID=${CHAT_ID} wid=${client.info?.wid?._serialized} primeiros IDs:`, chats.slice(0, 8).map(c => c.id._serialized));
-      return null;
-    } catch (err) {
-      console.warn(`[poll:${userId}] Erro ao resolver self-chat:`, err?.message);
-      return null;
-    }
+    }, phone);
   };
 
   const interval = setInterval(async () => {
     try {
-      // Resolve once, reuse thereafter
-      if (!resolvedChatId) {
-        resolvedChatId = await resolveSelfChatId();
-        if (!resolvedChatId) return;
+      const CHAT_ID = await getAssistantChatId(userId);
+      if (!CHAT_ID) return;
+
+      const phone = CHAT_ID.split('@')[0];
+      const result = await fetchFromStore(phone);
+
+      if (!result?.chatId) {
+        console.log(`[poll:${userId}] Store result:`, JSON.stringify(result));
+        return;
       }
 
-      const chats = await client.getChats();
-      const chat = chats.find(c => c.id._serialized === resolvedChatId);
-      if (!chat) { resolvedChatId = null; return; } // reset so it re-resolves next tick
+      const rawMessages = result.messages;
 
-      const messages = await chat.fetchMessages({ limit: 5 });
-
-      for (const message of messages) {
-        const msgTs = (message.timestamp || 0) * 1000;
+      for (const raw of rawMessages) {
+        const msgTs = raw.timestamp * 1000;
         if (msgTs <= lastSeenTs) continue;
-        console.log(`[poll:${userId}] Nova mensagem ts=${msgTs} fromMe=${message.fromMe} body="${message.body?.slice(0,50)}"`);
-        if (message.fromMe && botSentBodies.has(userScopedKey(userId, message.body || ''))) continue;
-        await processIncomingMessage(userId, client, message);
+        if (raw.fromMe && botSentBodies.has(userScopedKey(userId, raw.body))) continue;
+
+        console.log(`[poll:${userId}] Nova mensagem: fromMe=${raw.fromMe} body="${raw.body?.slice(0, 60)}"`);
+
+        // Cria um objeto de mensagem sintético compatível com processIncomingMessage.
+        // getChat() retorna um chat com o CHAT_ID do banco (evita incompatibilidade @lid vs @c.us).
+        // fetchMessages() devolve o histórico já carregado do store.
+        const rawHistory = rawMessages; // closure — lista atual de mensagens do store
+        const syntheticMessage = {
+          id: { _serialized: raw.id },
+          fromMe: raw.fromMe,
+          body: raw.body,
+          type: raw.type || 'chat',
+          hasMedia: false,
+          getChat: async () => ({
+            id: { _serialized: CHAT_ID },
+            fetchMessages: async ({ limit = 8 } = {}) =>
+              rawHistory.slice(-limit).map(m => ({
+                id: { _serialized: m.id },
+                fromMe: m.fromMe,
+                body: m.body,
+                type: m.type || 'chat',
+                hasMedia: false,
+              })),
+          }),
+          reply: async (text) => client.sendMessage(CHAT_ID, text),
+        };
+
+        await processIncomingMessage(userId, client, syntheticMessage);
       }
 
-      if (messages.length > 0) {
-        const maxTs = Math.max(...messages.map(m => (m.timestamp || 0) * 1000));
+      if (rawMessages.length > 0) {
+        const maxTs = Math.max(...rawMessages.map(m => m.timestamp * 1000));
         if (maxTs > lastSeenTs) lastSeenTs = maxTs;
       }
     } catch (err) {
