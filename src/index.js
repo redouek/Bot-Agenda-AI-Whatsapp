@@ -2,7 +2,7 @@ import fs from 'fs';
 import pkg from 'whatsapp-web.js';
 import { loadConfig, isPlatformConfigured } from './config.js';
 import { startServer } from './server.js';
-import { processIncomingMessage, startReminderLoop, stopReminderLoop } from './bot.js';
+import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling } from './bot.js';
 import {
   ensureUser,
   getDefaultUserId,
@@ -112,6 +112,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
       lastReadyAt: new Date().toISOString(),
     });
     startReminderLoop(user.id, client);
+    startSelfChatPolling(user.id, client);
   });
 
   client.on('auth_failure', async error => {
@@ -125,6 +126,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     runtime.status = 'disconnected';
     runtime.qr = null;
     stopReminderLoop(user.id);
+    stopSelfChatPolling(user.id);
     await updateWhatsAppSession(user.id, { status: 'disconnected', latestQr: null, sessionPath });
   });
 
@@ -166,6 +168,7 @@ export async function stopWhatsAppInstance(userId = getDefaultUserId()) {
   }
 
   stopReminderLoop(userId);
+  stopSelfChatPolling(userId);
   whatsappInstances.delete(userId);
   await updateWhatsAppSession(userId, { status: 'stopped', latestQr: null });
 }

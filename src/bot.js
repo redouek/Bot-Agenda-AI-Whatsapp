@@ -9,6 +9,7 @@ const processedMessageIds = new Set();
 const sentReminderIds = new Set();
 const botSentBodies = new Set();
 const reminderIntervals = new Map();
+const pollIntervals = new Map();
 
 function userScopedKey(userId, value) {
   return `${userId}:${value}`;
@@ -220,15 +221,9 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
 }
 
 export async function processIncomingMessage(userId, client, message) {
-  console.log(`[debug:${userId}] evento msg id=${message?.id?._serialized?.slice(-12)} fromMe=${message.fromMe} type=${message.type}`);
-
-  if (trackProcessedMessage(userId, message)) {
-    console.log(`[debug:${userId}] descartado: duplicado`);
-    return;
-  }
+  if (trackProcessedMessage(userId, message)) return;
 
   if (message.fromMe && message.body && botSentBodies.has(userScopedKey(userId, message.body))) {
-    console.log(`[debug:${userId}] descartado: mensagem propria do bot`);
     botSentBodies.delete(userScopedKey(userId, message.body));
     return;
   }
@@ -236,14 +231,12 @@ export async function processIncomingMessage(userId, client, message) {
   let chat;
   try {
     chat = await message.getChat();
-  } catch (err) {
-    console.log(`[debug:${userId}] descartado: getChat() falhou:`, err?.message);
+  } catch {
     return;
   }
 
   const chatId = chat?.id?._serialized || '';
   const CHAT_ID = await getAssistantChatId(userId);
-  console.log(`[debug:${userId}] chatId=${chatId} CHAT_ID=${CHAT_ID} match=${chatId === CHAT_ID}`);
   if (chatId !== CHAT_ID) return;
 
   const body = message.body || '';
@@ -388,4 +381,48 @@ export function stopReminderLoop(userId) {
   if (!interval) return;
   clearInterval(interval);
   reminderIntervals.delete(userId);
+}
+
+// Polling de mensagens — workaround para message_create não disparar no self-chat
+// em modo multi-device do whatsapp-web.js
+export function startSelfChatPolling(userId, client) {
+  if (pollIntervals.has(userId)) return;
+
+  let lastSeenTs = Date.now() - 60000;
+
+  const interval = setInterval(async () => {
+    try {
+      const CHAT_ID = await getAssistantChatId(userId);
+      if (!CHAT_ID) return;
+
+      const chat = await client.getChatById(CHAT_ID);
+      if (!chat) return;
+
+      const messages = await chat.fetchMessages({ limit: 5 });
+
+      for (const message of messages) {
+        const msgTs = (message.timestamp || 0) * 1000;
+        if (msgTs <= lastSeenTs) continue;
+        if (message.fromMe && botSentBodies.has(userScopedKey(userId, message.body || ''))) continue;
+        await processIncomingMessage(userId, client, message);
+      }
+
+      if (messages.length > 0) {
+        const maxTs = Math.max(...messages.map(m => (m.timestamp || 0) * 1000));
+        if (maxTs > lastSeenTs) lastSeenTs = maxTs;
+      }
+    } catch (err) {
+      console.warn(`[poll:${userId}] Erro:`, err?.message);
+    }
+  }, 4000);
+
+  pollIntervals.set(userId, interval);
+  console.log(`[poll:${userId}] Polling de self-chat iniciado (4s).`);
+}
+
+export function stopSelfChatPolling(userId) {
+  const interval = pollIntervals.get(userId);
+  if (!interval) return;
+  clearInterval(interval);
+  pollIntervals.delete(userId);
 }
