@@ -221,9 +221,13 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
 }
 
 export async function processIncomingMessage(userId, client, message) {
-  if (trackProcessedMessage(userId, message)) return;
+  if (trackProcessedMessage(userId, message)) {
+    console.log(`[debug:${userId}] dedup hit, ignoring "${message.body?.slice(0,40)}"`);
+    return;
+  }
 
   if (message.fromMe && message.body && botSentBodies.has(userScopedKey(userId, message.body))) {
+    console.log(`[debug:${userId}] botSentBodies hit, ignoring "${message.body?.slice(0,40)}"`);
     botSentBodies.delete(userScopedKey(userId, message.body));
     return;
   }
@@ -231,13 +235,17 @@ export async function processIncomingMessage(userId, client, message) {
   let chat;
   try {
     chat = await message.getChat();
-  } catch {
+  } catch (e) {
+    console.log(`[debug:${userId}] getChat threw: ${e?.message}`);
     return;
   }
 
   const chatId = chat?.id?._serialized || '';
   const CHAT_ID = await getAssistantChatId(userId);
-  if (chatId !== CHAT_ID) return;
+  if (chatId !== CHAT_ID) {
+    console.log(`[debug:${userId}] chatId mismatch: chatId="${chatId}" CHAT_ID="${CHAT_ID}"`);
+    return;
+  }
 
   const body = message.body || '';
   console.log(`[bot:${userId}] Mensagem recebida:`, { chatId, body: body.slice(0, 80) });
