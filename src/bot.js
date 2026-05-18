@@ -392,78 +392,43 @@ export function startSelfChatPolling(userId, client) {
 
   let lastSeenTs = Date.now() - 60000;
 
-  // Diagnóstico completo do store — executado UMA vez no início
-  let diagDone = false;
-  const diagStore = async () => {
-    if (diagDone) return;
-    diagDone = true;
-    const info = await client.pupPage.evaluate(() => {
-      try {
-        const Store = window.Store;
-        const storeKeys = Object.keys(Store).sort();
-        const connWid = Store.Conn?.wid?._serialized;
-        const connWidUser = Store.Conn?.wid?.user;
-        const allChats = Store.Chat?.getModelsArray() || [];
-        const atCus = allChats.filter(c => c.id?._serialized?.includes('@c.us')).map(c => c.id._serialized);
-        const atSNet = allChats.filter(c => c.id?._serialized?.includes('@s.whatsapp.net')).map(c => c.id._serialized);
-
-        // Tentar carregar self-chat via Chat.find()
-        let findResult = null;
-        try {
-          const wid = Store.WidFactory?.createWid(connWid);
-          const found = Store.Chat.get(wid);
-          findResult = found ? found.id._serialized : 'not found via get()';
-        } catch (e) { findResult = 'error: ' + e.message; }
-
-        // Ver se Store tem StarredMsg, SelfMsg, etc
-        const specialStores = ['StarredMsg', 'SelfMsg', 'Msg', 'MsgKey', 'SyncedMsg'].filter(k => k in Store);
-
-        return {
-          storeKeys: storeKeys.slice(0, 50),
-          connWid,
-          connWidUser,
-          totalChats: allChats.length,
-          atCus,
-          atSNet: atSNet.slice(0, 5),
-          findResult,
-          specialStores,
-        };
-      } catch (e) { return { error: e.message }; }
-    });
-    console.log('[poll:diag] Store info:', JSON.stringify(info, null, 2));
-  };
-
-  // Busca o self-chat diretamente do store interno do WA Web (bypassa getChats())
+  // Usa FindOrCreateChat para forçar o WA Web a carregar o self-chat,
+  // mesmo que ele não apareça em getChats() no modo multi-device.
   const fetchFromStore = async (phone) => {
-    return client.pupPage.evaluate((phoneNumber) => {
+    return client.pupPage.evaluate(async (phoneNumber) => {
       try {
         const Store = window.Store;
-        if (!Store?.Chat) return { error: 'Store.Chat indisponivel' };
 
-        const allChats = Store.Chat.getModelsArray();
+        // Tenta encontrar o self-chat pelo número em diferentes formatos
+        const formats = [
+          phoneNumber + '@c.us',
+          phoneNumber + '@s.whatsapp.net',
+        ];
 
-        // Tenta encontrar o self-chat por diferentes critérios
-        let selfChat =
-          // 1. contact.isMe = true (Mensagens Salvas)
-          allChats.find(c => { try { return c.contact?.isMe; } catch { return false; } }) ||
-          // 2. id.user bate com o número de telefone
-          allChats.find(c => c.id?.user === phoneNumber) ||
-          // 3. serialized exato @c.us
-          allChats.find(c => c.id?._serialized === phoneNumber + '@c.us') ||
-          // 4. serialized exato @s.whatsapp.net
-          allChats.find(c => c.id?._serialized === phoneNumber + '@s.whatsapp.net');
-
-        if (!selfChat) {
-          return {
-            error: 'self-chat nao encontrado',
-            sample: allChats.slice(0, 10).map(c => c.id?._serialized),
-          };
+        let chat = null;
+        for (const fmt of formats) {
+          try {
+            const wid = Store.WidFactory.createWid(fmt);
+            // FindOrCreateChat carrega o chat no store mesmo que não esteja em getChats()
+            chat = await Store.FindOrCreateChat.findOrCreateChat(wid);
+            if (chat) break;
+          } catch { /* tenta próximo formato */ }
         }
 
-        const msgs = selfChat.msgs?.getModelsArray?.() || [];
+        if (!chat) {
+          // Fallback: busca em getModelsArray por contact.isMe
+          const allChats = Store.Chat.getModelsArray();
+          chat = allChats.find(c => { try { return c.contact?.isMe; } catch { return false; } });
+        }
+
+        if (!chat) {
+          return { error: 'self-chat nao encontrado via FindOrCreateChat nem getModelsArray' };
+        }
+
+        const msgs = chat.msgs?.getModelsArray?.() || [];
         const recent = msgs.slice(-15);
         return {
-          chatId: selfChat.id._serialized,
+          chatId: chat.id._serialized,
           messages: recent.map(m => ({
             id: m.id?._serialized || '',
             body: m.body || '',
@@ -480,8 +445,6 @@ export function startSelfChatPolling(userId, client) {
 
   const interval = setInterval(async () => {
     try {
-      await diagStore();
-
       const CHAT_ID = await getAssistantChatId(userId);
       if (!CHAT_ID) return;
 
