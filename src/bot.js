@@ -236,6 +236,7 @@ export async function processIncomingMessage(userId, client, message) {
 
   const chatId = chat?.id?._serialized || '';
   const CHAT_ID = await getAssistantChatId(userId);
+  console.log(`[debug:${userId}] msg fromMe=${message.fromMe} chatId=${chatId} CHAT_ID=${CHAT_ID} match=${chatId === CHAT_ID}`);
   if (chatId !== CHAT_ID) return;
 
   const body = message.body || '';
