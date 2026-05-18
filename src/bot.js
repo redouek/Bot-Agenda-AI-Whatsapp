@@ -428,17 +428,36 @@ export function startSelfChatPolling(userId, client) {
         // Também busca em Store.Msg (mais abrangente)
         let storeMsgCount = 0;
         let storeMsgsForChat = [];
+        let sampleMsgs = [];
         try {
           if (Store.Msg?.getModelsArray) {
             const allMsgs = Store.Msg.getModelsArray();
             storeMsgCount = allMsgs.length;
             const targetChatId = chat.id._serialized;
+            const targetUser = chat.id.user;
+
+            // Tenta múltiplas formas de identificar mensagens do self-chat
             storeMsgsForChat = allMsgs
               .filter(m => {
-                const mChatId = m.id?.remote?._serialized || m.to?._serialized || m.from?._serialized;
-                return mChatId === targetChatId;
+                const remote = m.id?.remote?._serialized;
+                const to = m.to?._serialized;
+                const from = m.from?._serialized;
+                const idStr = m.id?._serialized || '';
+                return remote === targetChatId || to === targetChatId || from === targetChatId
+                  || m.id?.remote?.user === targetUser
+                  || idStr.includes('_' + targetChatId + '_');
               })
               .slice(-15);
+
+            // Pega amostra das últimas 5 msgs do store (todas, não filtradas) para debug
+            sampleMsgs = allMsgs.slice(-5).map(m => ({
+              idSer: m.id?._serialized || '',
+              remote: m.id?.remote?._serialized,
+              to: m.to?._serialized,
+              from: m.from?._serialized,
+              fromMe: m.id?.fromMe,
+              body: (m.body || '').slice(0, 30),
+            }));
           }
         } catch {}
 
@@ -452,6 +471,7 @@ export function startSelfChatPolling(userId, client) {
           storeMsgsForChatCount: storeMsgsForChat.length,
           loadMethod,
           loadResult,
+          sampleMsgs,
           messages: recent.map(m => ({
             id: m.id?._serialized || '',
             body: m.body || '',
@@ -469,6 +489,9 @@ export function startSelfChatPolling(userId, client) {
   const logSummary = (result) => {
     if (logTick++ % 5 === 0) {
       console.log(`[poll:${userId}] chat=${result.chatId} chatMsgs=${result.chatMsgsCount} storeMsgs=${result.storeMsgCount} forChat=${result.storeMsgsForChatCount} load=${result.loadMethod}`);
+      if (result.sampleMsgs?.length) {
+        console.log(`[poll:${userId}] amostra das ultimas msgs do store:`, JSON.stringify(result.sampleMsgs, null, 2));
+      }
     }
   };
 
