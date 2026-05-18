@@ -395,7 +395,8 @@ export function startSelfChatPolling(userId, client) {
       const CHAT_ID = await getAssistantChatId(userId);
       if (!CHAT_ID) return;
 
-      const chat = await client.getChatById(CHAT_ID);
+      const chats = await client.getChats();
+      const chat = chats.find(c => c.id._serialized === CHAT_ID);
       if (!chat) return;
 
       const messages = await chat.fetchMessages({ limit: 5 });
