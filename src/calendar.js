@@ -1,11 +1,8 @@
-import fs from 'fs';
-import path from 'path';
 import { google } from 'googleapis';
 import { getConfig } from './config.js';
+import { getGoogleTokens, getUser, saveGoogleTokens } from './database.js';
 
-const TOKENS_PATH = process.env.TOKENS_PATH || path.resolve('./data/google-tokens.json');
-
-let cachedCalendarClient = null;
+const cachedCalendarClients = new Map();
 
 function getOAuthClient() {
   const { GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET } = getConfig();
@@ -22,67 +19,62 @@ function getOAuthClient() {
   );
 }
 
-export function getAuthUrl() {
+export function getAuthUrl(userId) {
   const oauth2Client = getOAuthClient();
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
     scope: ['https://www.googleapis.com/auth/calendar'],
+    state: userId,
   });
 }
 
-export async function exchangeCodeForTokens(code) {
+export async function exchangeCodeForTokens(code, userId) {
   const oauth2Client = getOAuthClient();
   const { tokens } = await oauth2Client.getToken(code);
-  saveTokens(tokens);
-  cachedCalendarClient = null;
+  await saveGoogleTokens(userId, tokens);
+  cachedCalendarClients.delete(userId);
   return tokens;
 }
 
-export function saveTokens(tokens) {
-  const dir = path.dirname(TOKENS_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(TOKENS_PATH, JSON.stringify(tokens, null, 2), 'utf8');
-  cachedCalendarClient = null;
-}
+async function getCalendarClient(userId) {
+  if (cachedCalendarClients.has(userId)) return cachedCalendarClients.get(userId);
 
-function loadTokens() {
-  if (!fs.existsSync(TOKENS_PATH)) return null;
-  try {
-    return JSON.parse(fs.readFileSync(TOKENS_PATH, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-async function getCalendarClient() {
-  if (cachedCalendarClient) return cachedCalendarClient;
-
-  const tokens = loadTokens();
-  if (!tokens?.access_token || !tokens?.refresh_token) {
-    throw new Error('Google Calendar não conectado. Acesse o painel de setup e clique em "Conectar Google".');
+  const tokens = await getGoogleTokens(userId);
+  if (!tokens?.refresh_token) {
+    throw new Error('Google Calendar nao conectado. Acesse o painel de setup e clique em "Conectar Google".');
   }
 
   const oauth2Client = getOAuthClient();
   oauth2Client.setCredentials(tokens);
 
-  // Persiste tokens renovados automaticamente
-  oauth2Client.on('tokens', (newTokens) => {
-    const current = loadTokens() || {};
-    saveTokens({ ...current, ...newTokens });
+  oauth2Client.on('tokens', async (newTokens) => {
+    try {
+      await saveGoogleTokens(userId, newTokens);
+      cachedCalendarClients.delete(userId);
+    } catch (error) {
+      console.warn('[calendar] Falha ao persistir tokens renovados:', error?.message || error);
+    }
   });
 
-  cachedCalendarClient = google.calendar({ version: 'v3', auth: oauth2Client });
-  return cachedCalendarClient;
+  const client = google.calendar({ version: 'v3', auth: oauth2Client });
+  cachedCalendarClients.set(userId, client);
+  return client;
 }
 
-function getCalendarId() {
-  return getConfig().GOOGLE_CALENDAR_ID || 'primary';
+async function getCalendarId(userId) {
+  const user = await getUser(userId);
+  return user?.calendar_id || getConfig().GOOGLE_CALENDAR_ID || 'primary';
 }
 
-export async function createEvent(data) {
-  const client = await getCalendarClient();
-  const timeZone = data.timeZone || getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+async function getUserTimeZone(userId, fallback) {
+  const user = await getUser(userId);
+  return fallback || user?.timezone || getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+}
+
+export async function createEvent(data, userId) {
+  const client = await getCalendarClient(userId);
+  const timeZone = await getUserTimeZone(userId, data.timeZone);
 
   const event = {
     summary: data.summary || 'Evento WhatsApp',
@@ -100,14 +92,14 @@ export async function createEvent(data) {
   }
 
   console.log('[calendar] Criando evento - summary:', event.summary);
-  const res = await client.events.insert({ calendarId: getCalendarId(), requestBody: event });
+  const res = await client.events.insert({ calendarId: await getCalendarId(userId), requestBody: event });
   return res.data;
 }
 
-export async function listEvents(startDateTime, endDateTime) {
-  const client = await getCalendarClient();
+export async function listEvents(startDateTime, endDateTime, userId) {
+  const client = await getCalendarClient(userId);
   const res = await client.events.list({
-    calendarId: getCalendarId(),
+    calendarId: await getCalendarId(userId),
     timeMin: startDateTime,
     timeMax: endDateTime,
     singleEvents: true,
@@ -117,12 +109,27 @@ export async function listEvents(startDateTime, endDateTime) {
   return res.data.items || [];
 }
 
-export async function searchEvents(query, daysAhead = 60) {
-  const client = await getCalendarClient();
+export async function listCalendars(userId) {
+  const client = await getCalendarClient(userId);
+  const res = await client.calendarList.list({
+    minAccessRole: 'writer',
+    showHidden: false,
+  });
+
+  return (res.data.items || []).map(calendar => ({
+    id: calendar.id,
+    summary: calendar.summary || calendar.id,
+    primary: !!calendar.primary,
+    accessRole: calendar.accessRole,
+  }));
+}
+
+export async function searchEvents(query, daysAhead = 60, userId) {
+  const client = await getCalendarClient(userId);
   const timeMin = new Date().toISOString();
   const timeMax = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
   const res = await client.events.list({
-    calendarId: getCalendarId(),
+    calendarId: await getCalendarId(userId),
     q: query,
     timeMin,
     timeMax,
@@ -133,14 +140,14 @@ export async function searchEvents(query, daysAhead = 60) {
   return res.data.items || [];
 }
 
-export async function deleteEvent(eventId) {
-  const client = await getCalendarClient();
-  await client.events.delete({ calendarId: getCalendarId(), eventId });
+export async function deleteEvent(eventId, userId) {
+  const client = await getCalendarClient(userId);
+  await client.events.delete({ calendarId: await getCalendarId(userId), eventId });
 }
 
-export async function getUpcomingReminders(minutesAhead = 15) {
+export async function getUpcomingReminders(minutesAhead = 15, userId) {
   const now = new Date();
   const future = new Date(now.getTime() + minutesAhead * 60 * 1000);
-  const items = await listEvents(now.toISOString(), future.toISOString());
+  const items = await listEvents(now.toISOString(), future.toISOString(), userId);
   return items.filter(e => e.start?.dateTime);
 }

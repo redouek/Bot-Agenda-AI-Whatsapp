@@ -2,6 +2,17 @@ import fs from 'fs';
 import path from 'path';
 
 const CONFIG_PATH = process.env.CONFIG_PATH || path.resolve('./data/config.json');
+const ENV_CONFIG_KEYS = [
+  'GOOGLE_API_KEY',
+  'GEMINI_MODEL',
+  'GOOGLE_OAUTH_CLIENT_ID',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
+  'OAUTH_REDIRECT_URI',
+  'GOOGLE_CALENDAR_ID',
+  'FOOTBALL_DATA_KEY',
+  'REMINDER_MINUTES',
+  'DEFAULT_TIMEZONE',
+];
 
 let _config = {};
 
@@ -12,6 +23,10 @@ export function loadConfig() {
     }
   } catch {
     _config = {};
+  }
+
+  for (const key of ENV_CONFIG_KEYS) {
+    if (process.env[key]) _config[key] = process.env[key];
   }
 }
 
@@ -26,24 +41,15 @@ export function setConfig(partial) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(_config, null, 2), 'utf8');
 }
 
-export function isConfigComplete() {
+export function isPlatformConfigured() {
   const c = _config;
   return !!(
-    c.GRUPO_ASSISTENTE_ID &&
     c.GOOGLE_API_KEY &&
-    c.GOOGLE_CALENDAR_ID &&
     c.GOOGLE_OAUTH_CLIENT_ID &&
     c.GOOGLE_OAUTH_CLIENT_SECRET
   );
 }
 
-export function isCalendarConnected() {
-  const tokensPath = process.env.TOKENS_PATH || path.resolve('./data/google-tokens.json');
-  if (!fs.existsSync(tokensPath)) return false;
-  try {
-    const tokens = JSON.parse(fs.readFileSync(tokensPath, 'utf8'));
-    return !!(tokens.access_token && tokens.refresh_token);
-  } catch {
-    return false;
-  }
+export function isConfigComplete() {
+  return isPlatformConfigured();
 }

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin - Agenda IA WhatsApp</title>
+  <link rel="stylesheet" href="/web/style.css" />
+</head>
+<body class="help-page">
+  <main class="app-shell">
+    <aside class="brand-panel">
+      <div class="brand-mark">AI</div>
+      <p class="eyebrow">Admin</p>
+      <h1>Ative a plataforma.</h1>
+      <p class="brand-copy">Esta etapa e feita uma vez por voce, antes de liberar o onboarding para usuarios.</p>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Dono da solucao</p>
+          <h2>Configuracao da plataforma</h2>
+        </div>
+        <a class="btn-secondary" href="/">Ver onboarding</a>
+      </header>
+
+      <section class="panel">
+        <form id="admin-form">
+          <div class="panel-heading">
+            <p class="eyebrow">Obrigatorio</p>
+            <h3>Inteligencia artificial</h3>
+          </div>
+
+          <label class="field">
+            <span>Chave Gemini</span>
+            <input type="text" name="GOOGLE_API_KEY" placeholder="AIza..." autocomplete="off" />
+            <small><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Criar chave Gemini</a></small>
+          </label>
+
+          <label class="field">
+            <span>Modelo</span>
+            <input type="text" name="GEMINI_MODEL" placeholder="models/gemini-flash-latest" />
+            <small>Opcional</small>
+          </label>
+
+          <hr class="admin-divider" />
+
+          <div class="panel-heading">
+            <p class="eyebrow">Obrigatorio</p>
+            <h3>Entrar com Google</h3>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>Client ID</span>
+              <input type="text" name="GOOGLE_OAUTH_CLIENT_ID" placeholder="123456.apps.googleusercontent.com" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>Client Secret</span>
+              <input type="password" name="GOOGLE_OAUTH_CLIENT_SECRET" placeholder="GOCSPX-..." autocomplete="off" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>URL de redirecionamento</span>
+            <input type="text" name="OAUTH_REDIRECT_URI" placeholder="http://localhost:3000/oauth/callback" />
+            <small>Cadastre esta URL nas credenciais OAuth do Google.</small>
+          </label>
+
+          <a class="cta-link" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Abrir Google Cloud</a>
+
+          <div class="form-footer">
+            <button type="submit" class="btn-primary">Salvar plataforma</button>
+          </div>
+          <p id="admin-feedback" class="hidden feedback-ok">Plataforma salva.</p>
+        </form>
+      </section>
+    </section>
+  </main>
+
+  <script src="/web/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.git
+.env
+data
+tmp
+.session
+.wwebjs_cache
+.claude
+.vscode
+agenda-ai-red-*.json
+*-service-account*.json

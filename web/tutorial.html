@@ -3,516 +3,88 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tutorial de Instalação — WhatsApp Calendar Bot</title>
+  <title>Guia de Chaves - Agenda IA WhatsApp</title>
   <link rel="stylesheet" href="/web/style.css" />
-  <style>
-    body { background: #f0f2f5; }
-
-    .toc {
-      background: #fff;
-      border-radius: 12px;
-      padding: 1.25rem 1.5rem;
-      box-shadow: 0 1px 4px rgba(0,0,0,.08);
-      margin-bottom: 1.5rem;
-    }
-    .toc h3 { font-size: 1rem; margin-bottom: .75rem; color: #555; }
-    .toc ol { padding-left: 1.25rem; }
-    .toc li { margin: .35rem 0; }
-    .toc a { color: #25d366; text-decoration: none; font-size: .9rem; }
-    .toc a:hover { text-decoration: underline; }
-
-    .step {
-      background: #fff;
-      border-radius: 12px;
-      padding: 1.5rem;
-      box-shadow: 0 1px 4px rgba(0,0,0,.08);
-      margin-bottom: 1.5rem;
-      scroll-margin-top: 1rem;
-    }
-
-    .step-header {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 1.25rem;
-    }
-
-    .step-number {
-      background: #25d366;
-      color: #fff;
-      font-weight: 700;
-      font-size: 1.1rem;
-      border-radius: 50%;
-      width: 2.2rem;
-      height: 2.2rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .step-header h2 {
-      margin: 0;
-      font-size: 1.15rem;
-    }
-
-    .step p { margin: .6rem 0; line-height: 1.6; }
-
-    .substep {
-      background: #f8f9fb;
-      border-left: 3px solid #25d366;
-      border-radius: 0 8px 8px 0;
-      padding: .75rem 1rem;
-      margin: .75rem 0;
-    }
-
-    .substep strong { display: block; margin-bottom: .25rem; }
-
-    ol.instructions { padding-left: 1.4rem; }
-    ol.instructions li { margin: .5rem 0; line-height: 1.6; }
-
-    .tip {
-      background: #fffbe6;
-      border: 1px solid #ffe58f;
-      border-radius: 8px;
-      padding: .75rem 1rem;
-      font-size: .88rem;
-      margin: .75rem 0;
-    }
-    .tip::before { content: "💡 "; }
-
-    .warning {
-      background: #fff2f0;
-      border: 1px solid #ffccc7;
-      border-radius: 8px;
-      padding: .75rem 1rem;
-      font-size: .88rem;
-      margin: .75rem 0;
-    }
-    .warning::before { content: "⚠️ "; }
-
-    .success {
-      background: #e8fdf0;
-      border: 1px solid #95de64;
-      border-radius: 8px;
-      padding: .75rem 1rem;
-      font-size: .88rem;
-      margin: .75rem 0;
-    }
-    .success::before { content: "✅ "; }
-
-    code {
-      background: #f0f0f0;
-      padding: .15em .45em;
-      border-radius: 4px;
-      font-size: .88em;
-      font-family: monospace;
-    }
-
-    .code-block {
-      background: #1e1e2e;
-      color: #cdd6f4;
-      border-radius: 8px;
-      padding: .85rem 1.1rem;
-      font-family: monospace;
-      font-size: .9rem;
-      margin: .75rem 0;
-      overflow-x: auto;
-    }
-
-    a.link { color: #25d366; }
-
-    .image-placeholder {
-      background: #f0f2f5;
-      border: 2px dashed #ccc;
-      border-radius: 8px;
-      padding: 1.5rem;
-      text-align: center;
-      color: #999;
-      font-size: .85rem;
-      margin: .75rem 0;
-    }
-
-    .nav-bottom {
-      display: flex;
-      justify-content: space-between;
-      gap: 1rem;
-      margin-top: .5rem;
-      flex-wrap: wrap;
-    }
-
-    .final-step {
-      text-align: center;
-      padding: 2rem;
-    }
-    .final-step .big-icon { font-size: 3rem; margin-bottom: .75rem; }
-    .final-step h2 { font-size: 1.4rem; margin-bottom: .5rem; }
-    .final-step p { color: #555; }
-
-    .btn-start {
-      display: inline-block;
-      margin-top: 1.25rem;
-      background: #25d366;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: .75rem 2rem;
-      font-size: 1rem;
-      font-weight: 700;
-      text-decoration: none;
-      cursor: pointer;
-    }
-    .btn-start:hover { background: #1ebe5d; }
-
-    header { text-align: center; margin-bottom: 1.5rem; }
-    header h1 { font-size: 1.7rem; }
-    header p { color: #666; margin-top: .4rem; }
-
-    @media (max-width: 480px) {
-      .nav-bottom { flex-direction: column; }
-      .btn-primary, .btn-secondary { width: 100%; text-align: center; }
-    }
-  </style>
 </head>
-<body>
-<div class="container">
+<body class="help-page">
+  <main class="app-shell">
+    <aside class="brand-panel">
+      <div class="brand-mark">AI</div>
+      <p class="eyebrow">Guia rapido</p>
+      <h1>As chaves que voce precisa, sem susto.</h1>
+      <p class="brand-copy">Este guia existe para configurar a primeira instancia local. A publicacao na Oracle Cloud vem depois, quando o fluxo estiver validado.</p>
+    </aside>
 
-  <header>
-    <h1>📅 WhatsApp Calendar Bot</h1>
-    <p>Tutorial de instalação — passo a passo</p>
-  </header>
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Antes de conectar</p>
+          <h2>Onde pegar cada credencial</h2>
+        </div>
+        <a class="btn-secondary" href="/">Voltar ao onboarding</a>
+      </header>
 
-  <!-- Índice -->
-  <nav class="toc">
-    <h3>O que você vai fazer</h3>
-    <ol>
-      <li><a href="#passo1">Instalar o Docker Desktop</a></li>
-      <li><a href="#passo2">Baixar o projeto</a></li>
-      <li><a href="#passo3">Criar a chave da Gemini API</a></li>
-      <li><a href="#passo4">Criar as credenciais do Google Calendar</a></li>
-      <li><a href="#passo5">Rodar o bot</a></li>
-      <li><a href="#passo6">Configurar pelo painel</a></li>
-      <li><a href="#passo7">Conectar o WhatsApp</a></li>
-    </ol>
-  </nav>
+      <section class="panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Obrigatorio</p>
+          <h3>1. Chave Gemini API</h3>
+          <p>Ela permite que o bot interprete mensagens em linguagem natural.</p>
+        </div>
+        <details class="helper" open>
+          <summary>Passo a passo</summary>
+          <ol>
+            <li>Acesse <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio - API keys</a>.</li>
+            <li>Entre com sua conta Google.</li>
+            <li>Clique em Create API key.</li>
+            <li>Copie a chave que comeca com AIza e cole no onboarding.</li>
+          </ol>
+        </details>
+      </section>
 
-  <!-- Passo 1 -->
-  <section class="step" id="passo1">
-    <div class="step-header">
-      <div class="step-number">1</div>
-      <h2>Instalar o Docker Desktop</h2>
-    </div>
+      <section class="panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Obrigatorio</p>
+          <h3>2. Google Calendar OAuth</h3>
+          <p>Ele permite que voce autorize o bot a criar e consultar eventos na sua agenda.</p>
+        </div>
+        <details class="helper" open>
+          <summary>Passo a passo</summary>
+          <ol>
+            <li>Acesse <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud - Credentials</a>.</li>
+            <li>Crie ou selecione um projeto.</li>
+            <li>Ative a Google Calendar API.</li>
+            <li>Configure a OAuth consent screen como External para teste.</li>
+            <li>Crie uma credencial OAuth 2.0 do tipo Web application.</li>
+            <li>Em Authorized redirect URIs, use <strong>http://localhost:3000/oauth/callback</strong>.</li>
+            <li>Copie Client ID e Client Secret para o onboarding.</li>
+          </ol>
+        </details>
+      </section>
 
-    <p>O Docker é o programa que vai rodar o bot no seu computador. Você não precisa entender como ele funciona — só instalar.</p>
+      <section class="panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Opcional</p>
+          <h3>3. Football Data API</h3>
+          <p>Use apenas se quiser consultas sobre futebol. O bot de agenda funciona sem isso.</p>
+        </div>
+        <details class="helper" open>
+          <summary>Passo a passo</summary>
+          <ol>
+            <li>Acesse <a href="https://www.football-data.org/client/register" target="_blank" rel="noopener">football-data.org/client/register</a>.</li>
+            <li>Crie uma conta gratuita.</li>
+            <li>Copie a API key recebida e cole em Extras.</li>
+          </ol>
+        </details>
+      </section>
 
-    <ol class="instructions">
-      <li>
-        Acesse o site oficial:
-        <a class="link" href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noopener">docker.com/products/docker-desktop</a>
-      </li>
-      <li>Clique em <strong>Download Docker Desktop</strong> e escolha a versão para o seu sistema (Windows ou Mac).</li>
-      <li>Abra o instalador baixado e siga as instruções na tela.</li>
-      <li>Após instalar, <strong>abra o Docker Desktop</strong>. Ele vai aparecer na barra de tarefas (Windows) ou na barra de menus (Mac) com um ícone de baleia.</li>
-    </ol>
-
-    <div class="success">
-      Pronto quando você ver a mensagem <strong>"Docker Desktop is running"</strong> na tela inicial do app.
-    </div>
-
-    <div class="tip">
-      O Docker precisa ficar aberto em segundo plano enquanto o bot estiver rodando. Você não precisa mexer nele depois de abrir.
-    </div>
-  </section>
-
-  <!-- Passo 2 -->
-  <section class="step" id="passo2">
-    <div class="step-header">
-      <div class="step-number">2</div>
-      <h2>Baixar o projeto</h2>
-    </div>
-
-    <p>Você tem duas opções para baixar o projeto:</p>
-
-    <div class="substep">
-      <strong>Opção A — Baixar como ZIP (mais fácil)</strong>
-      <ol class="instructions">
-        <li>Acesse a <a class="link" href="https://github.com/redouek/Bot-Agenda-AI-Whatsapp" target="_blank" rel="noopener">página do projeto no GitHub</a>.</li>
-        <li>Clique no botão verde <strong>Code</strong> → <strong>Download ZIP</strong>.</li>
-        <li>Extraia o arquivo ZIP em uma pasta de fácil acesso (ex: sua área de trabalho).</li>
-      </ol>
-    </div>
-
-    <div class="substep">
-      <strong>Opção B — Via terminal (para quem já usa Git)</strong>
-      <div class="code-block">git clone https://github.com/redouek/Bot-Agenda-AI-Whatsapp.git</div>
-    </div>
-
-    <div class="tip">
-      Anote onde você salvou a pasta do projeto — você vai precisar abrir o terminal nela no Passo 5.
-    </div>
-  </section>
-
-  <!-- Passo 3 -->
-  <section class="step" id="passo3">
-    <div class="step-header">
-      <div class="step-number">3</div>
-      <h2>Criar a chave da Gemini API</h2>
-    </div>
-
-    <p>O Gemini é a inteligência artificial do Google que interpreta suas mensagens. A chave é gratuita.</p>
-
-    <ol class="instructions">
-      <li>
-        Acesse:
-        <a class="link" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">aistudio.google.com/app/apikey</a>
-      </li>
-      <li>Faça login com sua conta Google.</li>
-      <li>Clique em <strong>Create API key</strong>.</li>
-      <li>Escolha um projeto Google Cloud (pode criar um novo).</li>
-      <li>Copie a chave gerada — ela começa com <code>AIza...</code></li>
-    </ol>
-
-    <div class="warning">
-      Guarde essa chave em local seguro. Não compartilhe com ninguém — ela dá acesso à sua conta da API.
-    </div>
-
-    <div class="success">
-      Pronto quando você tiver uma chave no formato <code>AIzaSy...</code>
-    </div>
-  </section>
-
-  <!-- Passo 4 -->
-  <section class="step" id="passo4">
-    <div class="step-header">
-      <div class="step-number">4</div>
-      <h2>Criar as credenciais do Google Calendar</h2>
-    </div>
-
-    <p>Isso permite que o bot leia e crie eventos na sua agenda. São necessárias duas etapas: ativar o serviço e criar a credencial.</p>
-
-    <div class="substep">
-      <strong>4.1 — Criar um projeto no Google Cloud</strong>
-      <ol class="instructions">
-        <li>
-          Acesse:
-          <a class="link" href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a>
-        </li>
-        <li>No topo da página, clique no seletor de projetos → <strong>Novo projeto</strong>.</li>
-        <li>Dê um nome qualquer (ex: "whatsapp-bot") e clique em <strong>Criar</strong>.</li>
-      </ol>
-    </div>
-
-    <div class="substep">
-      <strong>4.2 — Ativar a Google Calendar API</strong>
-      <ol class="instructions">
-        <li>No menu lateral, acesse <strong>APIs & Services → Library</strong>.</li>
-        <li>Pesquise por <strong>"Google Calendar API"</strong>.</li>
-        <li>Clique nela e depois em <strong>Enable</strong>.</li>
-      </ol>
-    </div>
-
-    <div class="substep">
-      <strong>4.3 — Configurar a tela de consentimento OAuth</strong>
-      <ol class="instructions">
-        <li>Acesse <strong>APIs & Services → OAuth consent screen</strong>.</li>
-        <li>Escolha <strong>External</strong> e clique em <strong>Create</strong>.</li>
-        <li>Preencha o nome do app (ex: "Meu Bot") e seu e-mail de suporte.</li>
-        <li>Clique em <strong>Save and Continue</strong> nas próximas telas até chegar em <strong>Back to Dashboard</strong>.</li>
-      </ol>
-    </div>
-
-    <div class="substep">
-      <strong>4.4 — Criar as credenciais OAuth</strong>
-      <ol class="instructions">
-        <li>Acesse <strong>APIs & Services → Credentials</strong>.</li>
-        <li>Clique em <strong>+ Create Credentials → OAuth 2.0 Client IDs</strong>.</li>
-        <li>Em <em>Application type</em>, escolha <strong>Web application</strong>.</li>
-        <li>
-          Em <strong>Authorized redirect URIs</strong>, clique em <em>Add URI</em> e cole a URL correspondente à sua instalação:
-          <div class="code-block">
-            # Instalação local (computador):<br />
-            http://localhost:3000/oauth/callback<br /><br />
-            # Instalação em VPS (substitua pelo IP ou domínio do servidor):<br />
-            http://IP_DO_SERVIDOR:3000/oauth/callback
-          </div>
-        </li>
-        <li>Clique em <strong>Create</strong>.</li>
-        <li>Copie o <strong>Client ID</strong> e o <strong>Client Secret</strong> exibidos.</li>
-      </ol>
-    </div>
-
-    <div class="tip">
-      No painel de configuração (Passo 6), preencha o campo <strong>URL de redirecionamento OAuth</strong> com a mesma URL que você cadastrou aqui. Para instalação local, o valor padrão já está correto.
-    </div>
-
-    <div class="success">
-      Pronto quando você tiver o <strong>Client ID</strong> (termina em <code>.apps.googleusercontent.com</code>) e o <strong>Client Secret</strong> (começa com <code>GOCSPX-</code>).
-    </div>
-  </section>
-
-  <!-- Passo 5 -->
-  <section class="step" id="passo5">
-    <div class="step-header">
-      <div class="step-number">5</div>
-      <h2>Rodar o bot</h2>
-    </div>
-
-    <p>Agora você vai abrir o terminal na pasta do projeto e rodar um único comando.</p>
-
-    <div class="substep">
-      <strong>Como abrir o terminal na pasta certa</strong>
-      <ol class="instructions">
-        <li><strong>Windows:</strong> Abra a pasta do projeto no Explorador de Arquivos → clique na barra de endereços → digite <code>cmd</code> → Enter.</li>
-        <li><strong>Mac:</strong> Clique com botão direito na pasta do projeto → <em>Serviços</em> → <em>Novo Terminal na Pasta</em>.</li>
-        <li><strong>VS Code:</strong> Abra a pasta no VS Code → menu <em>Terminal</em> → <em>New Terminal</em>.</li>
-      </ol>
-    </div>
-
-    <p>Com o terminal aberto na pasta do projeto, cole o comando:</p>
-    <div class="code-block">docker compose up --build</div>
-
-    <p>Aguarde. Na primeira vez vai baixar as dependências — pode demorar 2 a 5 minutos dependendo da sua internet.</p>
-
-    <div class="success">
-      Pronto quando aparecer no terminal:<br />
-      <code>[server] Painel disponível em http://localhost:3000</code>
-    </div>
-
-    <div class="tip">
-      Deixe essa janela do terminal aberta enquanto usar o bot. Fechar o terminal encerra o bot.
-    </div>
-  </section>
-
-  <!-- Passo 6 -->
-  <section class="step" id="passo6">
-    <div class="step-header">
-      <div class="step-number">6</div>
-      <h2>Configurar pelo painel</h2>
-    </div>
-
-    <p>
-      Abra o navegador e acesse:
-      <a class="link" href="http://localhost:3000" target="_blank" rel="noopener">http://localhost:3000</a>
-    </p>
-
-    <p>Você verá um formulário. Preencha cada campo com as informações que você coletou nos passos anteriores:</p>
-
-    <div class="substep">
-      <strong>Número WhatsApp (self-chat ID)</strong>
-      <p>É o seu próprio número, no formato: DDI + DDD + número + <code>@c.us</code></p>
-      <p>Exemplos:</p>
-      <div class="code-block">5511999999999@c.us &nbsp;← celular brasileiro (55 + DDD + número)<br />5521988888888@c.us</div>
-      <div class="tip">Não coloque o <code>+</code> na frente. O número não pode ter traços ou espaços.</div>
-    </div>
-
-    <div class="substep">
-      <strong>Chave da API Gemini</strong>
-      <p>Cole a chave que você copiou no Passo 3 (começa com <code>AIza...</code>).</p>
-    </div>
-
-    <div class="substep">
-      <strong>OAuth Client ID e Client Secret</strong>
-      <p>Cole os valores copiados no Passo 4.4.</p>
-    </div>
-
-    <div class="substep">
-      <strong>ID do Calendário</strong>
-      <p>Use o e-mail da sua conta Google (ex: <code>seunome@gmail.com</code>) ou simplesmente <code>primary</code>.</p>
-    </div>
-
-    <div class="substep">
-      <strong>Minutos de lembrete</strong>
-      <p>Quantos minutos antes de um evento você quer receber o lembrete. O padrão é <code>15</code>.</p>
-    </div>
-
-    <p>Clique em <strong>Salvar configuração</strong>.</p>
-
-    <p>Depois clique em <strong>Conectar Google Calendar</strong>. Uma janela do Google vai abrir — faça login e clique em <strong>Permitir</strong>.</p>
-
-    <div class="success">
-      Pronto quando aparecer "Google Calendar conectado!" no painel.
-    </div>
-  </section>
-
-  <!-- Passo 7 -->
-  <section class="step" id="passo7">
-    <div class="step-header">
-      <div class="step-number">7</div>
-      <h2>Conectar o WhatsApp</h2>
-    </div>
-
-    <p>O painel vai exibir um QR code. Você precisa escanear com o seu celular.</p>
-
-    <ol class="instructions">
-      <li>No celular, abra o <strong>WhatsApp</strong>.</li>
-      <li>
-        Toque nos três pontos (Android) ou em <strong>Configurações</strong> (iPhone).
-      </li>
-      <li>Toque em <strong>Dispositivos conectados</strong>.</li>
-      <li>Toque em <strong>Conectar dispositivo</strong>.</li>
-      <li>Aponte a câmera para o QR code na tela do computador.</li>
-    </ol>
-
-    <div class="success">
-      Pronto quando o painel mostrar <strong>"WhatsApp conectado"</strong>.
-    </div>
-
-    <div class="warning">
-      O QR code expira a cada ~20 segundos e é renovado automaticamente. Se passar da hora, só aguardar o novo aparecer.
-    </div>
-  </section>
-
-  <!-- Conclusão -->
-  <section class="step final-step">
-    <div class="big-icon">🎉</div>
-    <h2>Bot instalado e funcionando!</h2>
-    <p>Agora mande uma mensagem para <strong>si mesmo</strong> no WhatsApp e teste:</p>
-    <br />
-    <p><em>"churrasco sábado às 15h"</em></p>
-    <p><em>"o que tenho hoje?"</em></p>
-    <p><em>"o que você pode fazer?"</em></p>
-    <br />
-    <a href="http://localhost:3000" target="_blank" rel="noopener" class="btn-start">Abrir painel do bot</a>
-  </section>
-
-  <!-- FAQ -->
-  <section class="step" id="faq">
-    <div class="step-header">
-      <div class="step-number">?</div>
-      <h2>Dúvidas frequentes</h2>
-    </div>
-
-    <div class="substep">
-      <strong>O bot para quando fecho o computador?</strong>
-      <p>Sim. Para deixar o bot rodando 24h, você precisaria de um servidor (VPS). Em casa, o bot funciona enquanto o computador estiver ligado e o Docker aberto.</p>
-    </div>
-
-    <div class="substep">
-      <strong>Preciso escanear o QR code toda vez?</strong>
-      <p>Não. A sessão do WhatsApp fica salva. Você só escaneia na primeira vez (ou se o WhatsApp desconectar por inatividade).</p>
-    </div>
-
-    <div class="substep">
-      <strong>Como faço para parar o bot?</strong>
-      <p>No terminal onde está rodando, pressione <code>Ctrl + C</code>. Para reiniciar depois: <code>docker compose up</code> (sem o <code>--build</code>).</p>
-    </div>
-
-    <div class="substep">
-      <strong>Minha conta do WhatsApp pode ser banida?</strong>
-      <p>O bot usa o WhatsApp Web de forma automatizada, o que tecnicamente viola os termos de uso do WhatsApp. Para uso pessoal o risco é baixo, mas existe. Use por sua conta e risco.</p>
-    </div>
-
-    <div class="substep">
-      <strong>O bot vai custar algo?</strong>
-      <p>Provavelmente não. A API Gemini tem um nível gratuito generoso para uso pessoal. O Google Calendar API também é gratuito. O único custo seria de infraestrutura se você quiser rodar em um servidor.</p>
-    </div>
-  </section>
-
-  <footer style="text-align:center; color:#999; font-size:.8rem; padding: 1rem 0 2rem;">
-    <a href="/" class="link">← Voltar ao painel</a>
-  </footer>
-
-  
-</div>
+      <section class="panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Depois do teste local</p>
+          <h3>Oracle Cloud</h3>
+          <p>Como voce ainda nao tem conta nem servidor configurado, a ordem certa e validar tudo localmente primeiro. Depois fazemos a etapa Oracle: criar conta Always Free, VM, dominio/IP, variaveis, processo permanente e URL OAuth nova.</p>
+        </div>
+      </section>
+    </section>
+  </main>
 </body>
 </html>

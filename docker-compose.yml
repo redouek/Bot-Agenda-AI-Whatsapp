@@ -3,9 +3,16 @@ services:
     build: .
     ports:
       - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CONFIG_PATH: /data/config.json
+      DB_PATH: /data/app.sqlite
+      SESSIONS_ROOT: /data/whatsapp-sessions
     volumes:
       - bot_data:/data
     restart: unless-stopped
+    shm_size: "1gb"
 
 volumes:
   bot_data:

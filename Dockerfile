@@ -10,9 +10,9 @@ RUN apt-get update \
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV SESSION_PATH=/data/whatsapp-session
 ENV CONFIG_PATH=/data/config.json
-ENV TOKENS_PATH=/data/google-tokens.json
+ENV DB_PATH=/data/app.sqlite
+ENV SESSIONS_ROOT=/data/whatsapp-sessions
 ENV NODE_ENV=production
 
 WORKDIR /app
