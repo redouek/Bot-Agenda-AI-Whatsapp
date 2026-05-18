@@ -1,5 +1,16 @@
-FROM node:20-slim
+# Stage 1: compila addons nativos (sqlite3) from source contra o GLIBC local
+FROM node:20-slim AS deps
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3 \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm_config_build_from_source=true npm install --omit=dev
 
+# Stage 2: imagem de produção — sem ferramentas de build
+FROM node:20-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     wget \
@@ -16,13 +27,10 @@ ENV SESSIONS_ROOT=/data/whatsapp-sessions
 ENV NODE_ENV=production
 
 WORKDIR /app
-
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
-
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json ./
 COPY src/ ./src/
 COPY web/ ./web/
 
 EXPOSE 3000
-
 CMD ["node", "src/index.js"]
