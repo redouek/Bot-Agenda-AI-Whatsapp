@@ -393,8 +393,9 @@ export function startSelfChatPolling(userId, client) {
   let lastSeenTs = Date.now() - 60000;
 
   // Acessa o self-chat via Store.Chat.find(wid) — o único método que funciona
-  // para Mensagens Salvas no modo multi-device (getChats() não inclui o self-chat,
-  // e FindOrCreateChat.findOrCreateChat não existe mais nas versões atuais do WA Web).
+  // para Mensagens Salvas no modo multi-device. Força o carregamento das mensagens
+  // antes de ler, pois Chat.find retorna apenas metadados do chat.
+  let logTick = 0;
   const fetchFromStore = async (phone) => {
     return client.pupPage.evaluate(async (phoneNumber) => {
       try {
@@ -406,10 +407,51 @@ export function startSelfChatPolling(userId, client) {
           return { error: 'Chat.find retornou vazio' };
         }
 
+        // Força o carregamento das mensagens via Store.ConversationMsgs ou loadEarlierMsgs
+        let loadMethod = 'none';
+        let loadResult = null;
+        try {
+          if (typeof chat.loadEarlierMsgs === 'function') {
+            await chat.loadEarlierMsgs();
+            loadMethod = 'chat.loadEarlierMsgs';
+          } else if (Store.ConversationMsgs?.loadEarlierMsgs) {
+            await Store.ConversationMsgs.loadEarlierMsgs(chat);
+            loadMethod = 'Store.ConversationMsgs.loadEarlierMsgs';
+          } else if (Store.ConversationMsgs?.loadAroundPlaytailMsgs) {
+            await Store.ConversationMsgs.loadAroundPlaytailMsgs(chat);
+            loadMethod = 'loadAroundPlaytailMsgs';
+          }
+        } catch (e) { loadResult = e.message; }
+
         const msgs = chat.msgs?.getModelsArray?.() || [];
-        const recent = msgs.slice(-15);
+
+        // Também busca em Store.Msg (mais abrangente)
+        let storeMsgCount = 0;
+        let storeMsgsForChat = [];
+        try {
+          if (Store.Msg?.getModelsArray) {
+            const allMsgs = Store.Msg.getModelsArray();
+            storeMsgCount = allMsgs.length;
+            const targetChatId = chat.id._serialized;
+            storeMsgsForChat = allMsgs
+              .filter(m => {
+                const mChatId = m.id?.remote?._serialized || m.to?._serialized || m.from?._serialized;
+                return mChatId === targetChatId;
+              })
+              .slice(-15);
+          }
+        } catch {}
+
+        const useMsgs = msgs.length > 0 ? msgs : storeMsgsForChat;
+        const recent = useMsgs.slice(-15);
+
         return {
           chatId: chat.id._serialized,
+          chatMsgsCount: msgs.length,
+          storeMsgCount,
+          storeMsgsForChatCount: storeMsgsForChat.length,
+          loadMethod,
+          loadResult,
           messages: recent.map(m => ({
             id: m.id?._serialized || '',
             body: m.body || '',
@@ -422,6 +464,12 @@ export function startSelfChatPolling(userId, client) {
         return { error: e.message };
       }
     }, phone);
+  };
+
+  const logSummary = (result) => {
+    if (logTick++ % 5 === 0) {
+      console.log(`[poll:${userId}] chat=${result.chatId} chatMsgs=${result.chatMsgsCount} storeMsgs=${result.storeMsgCount} forChat=${result.storeMsgsForChatCount} load=${result.loadMethod}`);
+    }
   };
 
   const interval = setInterval(async () => {
@@ -437,6 +485,7 @@ export function startSelfChatPolling(userId, client) {
         return;
       }
 
+      logSummary(result);
       const rawMessages = result.messages;
 
       for (const raw of rawMessages) {
