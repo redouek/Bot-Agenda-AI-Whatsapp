@@ -390,20 +390,33 @@ export function startSelfChatPolling(userId, client) {
 
   let lastSeenTs = Date.now() - 60000;
 
+  let debugTick = 0;
   const interval = setInterval(async () => {
     try {
       const CHAT_ID = await getAssistantChatId(userId);
-      if (!CHAT_ID) return;
+      if (!CHAT_ID) {
+        if (debugTick++ % 15 === 0) console.log(`[poll:${userId}] CHAT_ID nao encontrado no banco`);
+        return;
+      }
 
       const chats = await client.getChats();
       const chat = chats.find(c => c.id._serialized === CHAT_ID);
+      if (debugTick++ % 15 === 0) {
+        console.log(`[poll:${userId}] CHAT_ID=${CHAT_ID} chats=${chats.length} encontrado=${!!chat}`);
+        if (!chat) {
+          const selfChats = chats.filter(c => c.id._serialized.includes('@c.us') && c.id._serialized === c.id.user + '@c.us');
+          console.log(`[poll:${userId}] IDs dos primeiros 5 chats:`, chats.slice(0,5).map(c => c.id._serialized));
+        }
+      }
       if (!chat) return;
 
       const messages = await chat.fetchMessages({ limit: 5 });
+      if (debugTick % 15 === 1) console.log(`[poll:${userId}] fetchMessages=${messages.length} lastSeenTs=${lastSeenTs}`);
 
       for (const message of messages) {
         const msgTs = (message.timestamp || 0) * 1000;
         if (msgTs <= lastSeenTs) continue;
+        console.log(`[poll:${userId}] Nova mensagem ts=${msgTs} fromMe=${message.fromMe} body="${message.body?.slice(0,50)}"`);
         if (message.fromMe && botSentBodies.has(userScopedKey(userId, message.body || ''))) continue;
         await processIncomingMessage(userId, client, message);
       }
