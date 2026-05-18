@@ -14,3 +14,11 @@ services:
       - ./data:/data
     restart: unless-stopped
     shm_size: "1gb"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file: ./bot.env
+    depends_on:
+      - bot
