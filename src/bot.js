@@ -220,9 +220,15 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
 }
 
 export async function processIncomingMessage(userId, client, message) {
-  if (trackProcessedMessage(userId, message)) return;
+  console.log(`[debug:${userId}] evento msg id=${message?.id?._serialized?.slice(-12)} fromMe=${message.fromMe} type=${message.type}`);
+
+  if (trackProcessedMessage(userId, message)) {
+    console.log(`[debug:${userId}] descartado: duplicado`);
+    return;
+  }
 
   if (message.fromMe && message.body && botSentBodies.has(userScopedKey(userId, message.body))) {
+    console.log(`[debug:${userId}] descartado: mensagem propria do bot`);
     botSentBodies.delete(userScopedKey(userId, message.body));
     return;
   }
@@ -230,13 +236,14 @@ export async function processIncomingMessage(userId, client, message) {
   let chat;
   try {
     chat = await message.getChat();
-  } catch {
+  } catch (err) {
+    console.log(`[debug:${userId}] descartado: getChat() falhou:`, err?.message);
     return;
   }
 
   const chatId = chat?.id?._serialized || '';
   const CHAT_ID = await getAssistantChatId(userId);
-  console.log(`[debug:${userId}] msg fromMe=${message.fromMe} chatId=${chatId} CHAT_ID=${CHAT_ID} match=${chatId === CHAT_ID}`);
+  console.log(`[debug:${userId}] chatId=${chatId} CHAT_ID=${CHAT_ID} match=${chatId === CHAT_ID}`);
   if (chatId !== CHAT_ID) return;
 
   const body = message.body || '';
