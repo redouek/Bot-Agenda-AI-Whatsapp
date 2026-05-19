@@ -10,6 +10,7 @@ const sentReminderIds = new Set();
 const botSentBodies = new Set();
 const reminderIntervals = new Map();
 const pollIntervals = new Map();
+const selfChatLidByUser = new Map();
 
 function userScopedKey(userId, value) {
   return `${userId}:${value}`;
@@ -221,29 +222,27 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
 }
 
 export async function processIncomingMessage(userId, client, message) {
-  if (trackProcessedMessage(userId, message)) {
-    console.log(`[debug:${userId}] dedup hit, ignoring "${message.body?.slice(0,40)}"`);
-    return;
-  }
-
-  if (message.fromMe && message.body && botSentBodies.has(userScopedKey(userId, message.body))) {
-    console.log(`[debug:${userId}] botSentBodies hit, ignoring "${message.body?.slice(0,40)}"`);
-    botSentBodies.delete(userScopedKey(userId, message.body));
-    return;
-  }
-
+  // Verifica self-chat ANTES do dedup (evita adicionar ID e bloquear polling depois)
   let chat;
   try {
     chat = await message.getChat();
-  } catch (e) {
-    console.log(`[debug:${userId}] getChat threw: ${e?.message}`);
+  } catch {
     return;
   }
 
-  const chatId = chat?.id?._serialized || '';
+  const rawChatId = chat?.id?._serialized || '';
   const CHAT_ID = await getAssistantChatId(userId);
-  if (chatId !== CHAT_ID) {
-    console.log(`[debug:${userId}] chatId mismatch: chatId="${chatId}" CHAT_ID="${CHAT_ID}"`);
+  const selfLid = selfChatLidByUser.get(userId);
+  const isSelfChat = rawChatId === CHAT_ID || (selfLid && rawChatId === selfLid);
+  if (!isSelfChat) return;
+
+  // Normaliza para CHAT_ID em todos os usos downstream (pendingActions, replies, etc.)
+  const chatId = CHAT_ID;
+
+  if (trackProcessedMessage(userId, message)) return;
+
+  if (message.fromMe && message.body && botSentBodies.has(userScopedKey(userId, message.body))) {
+    botSentBodies.delete(userScopedKey(userId, message.body));
     return;
   }
 
@@ -403,7 +402,6 @@ export function startSelfChatPolling(userId, client) {
   // Acessa o self-chat no modo multi-device.
   // O Mensagens Salvas usa o LID do próprio usuário como chat ID (não @c.us).
   // Descobrimos o LID dinamicamente a partir de qualquer mensagem fromMe.
-  let logTick = 0;
   const fetchFromStore = async () => {
     return client.pupPage.evaluate(async () => {
       try {
@@ -454,18 +452,10 @@ export function startSelfChatPolling(userId, client) {
     });
   };
 
-  let lastReportedCount = -1;
-  const logSummary = (result) => {
-    const currentCount = Math.max(result.chatMsgsCount || 0, result.selfChatMsgsInStore || 0);
-    // Log sempre que mudar a contagem, ou a cada 10 ticks
-    if (currentCount !== lastReportedCount || logTick++ % 10 === 0) {
-      lastReportedCount = currentCount;
-      console.log(`[poll:${userId}] userLid=${result.userLid} chatId=${result.chatId} chatMsgs=${result.chatMsgsCount} selfMsgs=${result.selfChatMsgsInStore} totalStore=${result.totalStoreMsgs}`);
-      if (result.messages?.length) {
-        console.log(`[poll:${userId}] mensagens no self-chat:`, JSON.stringify(result.messages.map(m => ({
-          ts: m.timestamp, age: Math.floor((Date.now()/1000 - m.timestamp)) + 's', fromMe: m.fromMe, body: m.body?.slice(0, 60)
-        })), null, 2));
-      }
+  const updateUserLid = (result) => {
+    if (result?.userLid && selfChatLidByUser.get(userId) !== result.userLid) {
+      selfChatLidByUser.set(userId, result.userLid);
+      console.log(`[poll:${userId}] LID do self-chat registrado: ${result.userLid}`);
     }
   };
 
@@ -477,11 +467,10 @@ export function startSelfChatPolling(userId, client) {
       const result = await fetchFromStore();
 
       if (!result?.chatId) {
-        console.log(`[poll:${userId}] Store result:`, JSON.stringify(result));
         return;
       }
 
-      logSummary(result);
+      updateUserLid(result);
       const rawMessages = result.messages;
 
       for (const raw of rawMessages) {
