@@ -19,14 +19,17 @@ function nowIso() {
 }
 
 function normalizeUserId(value) {
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-
+  // Aceita email (com @ e .) ou identificador simples. So padroniza para lowercase + trim.
+  const normalized = String(value || '').trim().toLowerCase();
   return normalized || DEFAULT_USER_ID;
+}
+
+// Converte userId em nome de pasta seguro para o filesystem (sessoes do whatsapp).
+function userIdToFolder(userId) {
+  return String(userId || '')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || DEFAULT_USER_ID;
 }
 
 async function getDb() {
@@ -89,6 +92,12 @@ export async function initDatabase() {
   } catch {
     // Coluna ja existe — segue o jogo
   }
+  // Migration: adiciona google_sub para mapear identidade Google
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN google_sub TEXT');
+  } catch {
+    // Coluna ja existe
+  }
 
   await ensureUser({
     id: DEFAULT_USER_ID,
@@ -110,11 +119,12 @@ export async function ensureUser(input = {}) {
 
   await db.run(
     `
-      INSERT INTO users (id, name, email, calendar_id, assistant_chat_id, timezone, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (id, name, email, google_sub, calendar_id, assistant_chat_id, timezone, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = COALESCE(excluded.name, users.name),
         email = COALESCE(excluded.email, users.email),
+        google_sub = COALESCE(excluded.google_sub, users.google_sub),
         calendar_id = COALESCE(excluded.calendar_id, users.calendar_id),
         assistant_chat_id = COALESCE(excluded.assistant_chat_id, users.assistant_chat_id),
         timezone = COALESCE(excluded.timezone, users.timezone),
@@ -124,6 +134,7 @@ export async function ensureUser(input = {}) {
       id,
       name,
       input.email || null,
+      input.googleSub || input.google_sub || null,
       input.calendarId || input.calendar_id || null,
       input.assistantChatId || input.assistant_chat_id || null,
       input.timezone || null,
@@ -134,6 +145,18 @@ export async function ensureUser(input = {}) {
 
   await ensureWhatsAppSession(id);
   return getUser(id);
+}
+
+export async function findUserByEmail(email) {
+  if (!email) return null;
+  const db = await getDb();
+  return db.get('SELECT * FROM users WHERE lower(email) = lower(?)', email);
+}
+
+export async function findUserByGoogleSub(sub) {
+  if (!sub) return null;
+  const db = await getDb();
+  return db.get('SELECT * FROM users WHERE google_sub = ?', sub);
 }
 
 export async function getUser(userId = DEFAULT_USER_ID) {
@@ -267,7 +290,7 @@ export async function ensureWhatsAppSession(userId = DEFAULT_USER_ID) {
 
 export function getWhatsAppSessionPath(userId = DEFAULT_USER_ID) {
   const id = normalizeUserId(userId);
-  return path.resolve(process.env.SESSIONS_ROOT || './data/whatsapp-sessions', id);
+  return path.resolve(process.env.SESSIONS_ROOT || './data/whatsapp-sessions', userIdToFolder(id));
 }
 
 export async function updateWhatsAppSession(userId, partial = {}) {

@@ -19,6 +19,25 @@ function getOAuthClient() {
   );
 }
 
+const LOGIN_SCOPES = [
+  'openid',
+  'email',
+  'profile',
+  'https://www.googleapis.com/auth/calendar',
+];
+
+// Url para fluxo de LOGIN — pede identidade (email/sub) alem do Calendar.
+export function getLoginAuthUrl(state) {
+  const oauth2Client = getOAuthClient();
+  return oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: LOGIN_SCOPES,
+    state,
+  });
+}
+
+// Url legacy mantida para reconnect manual do Calendar (continua funcionando).
 export function getAuthUrl(userId) {
   const oauth2Client = getOAuthClient();
   return oauth2Client.generateAuthUrl({
@@ -27,6 +46,35 @@ export function getAuthUrl(userId) {
     scope: ['https://www.googleapis.com/auth/calendar'],
     state: userId,
   });
+}
+
+// Troca o code do callback de LOGIN por tokens + perfil Google (sub, email, name).
+export async function exchangeCodeForLogin(code) {
+  const oauth2Client = getOAuthClient();
+  const { tokens } = await oauth2Client.getToken(code);
+  oauth2Client.setCredentials(tokens);
+
+  // Decodifica id_token sem verificar assinatura local (vem direto do Google via HTTPS)
+  let profile = {};
+  if (tokens.id_token) {
+    const parts = tokens.id_token.split('.');
+    if (parts.length === 3) {
+      try {
+        profile = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      } catch {}
+    }
+  }
+
+  // Fallback: chama o endpoint userinfo se nao veio id_token decodificavel
+  if (!profile.email) {
+    try {
+      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+      const me = await oauth2.userinfo.get();
+      profile = { ...profile, ...me.data };
+    } catch {}
+  }
+
+  return { tokens, profile };
 }
 
 export async function exchangeCodeForTokens(code, userId) {

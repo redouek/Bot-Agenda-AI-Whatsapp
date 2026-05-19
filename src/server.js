@@ -5,13 +5,17 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import qrcode from 'qrcode';
 import { getConfig, setConfig, isPlatformConfigured } from './config.js';
-import { getAuthUrl, exchangeCodeForTokens, listCalendars } from './calendar.js';
+import { getAuthUrl, getLoginAuthUrl, exchangeCodeForLogin, exchangeCodeForTokens, listCalendars } from './calendar.js';
 import {
+  ensureUser,
+  findUserByEmail,
+  findUserByGoogleSub,
   getDefaultUserId,
   getLatestQr,
   getUser,
   isGoogleConnected,
   listUsers,
+  saveGoogleTokens,
   updateUserSettings,
   getWhatsAppSession,
 } from './database.js';
@@ -69,9 +73,69 @@ function parseCookies(cookieHeader = '') {
   }, {});
 }
 
-function getRequestUserId(req, url) {
+// ---------- Sessao do usuario (cookie assinado HMAC) ----------
+const USER_COOKIE = 'userSession';
+const USER_SESSION_MS = 120 * 24 * 60 * 60 * 1000; // 120 dias
+
+function getSessionSecret() {
+  // Tenta env var primeiro
+  if (process.env.SESSION_SECRET) {
+    return crypto.createHash('sha256').update('user-session:' + process.env.SESSION_SECRET).digest();
+  }
+  // Fallback: deriva de um arquivo estavel auto-gerado em ./data
+  const file = path.resolve(process.env.DATA_DIR || './data', '.session-secret');
+  try {
+    if (!fs.existsSync(file)) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, crypto.randomBytes(32).toString('hex'), { mode: 0o600 });
+    }
+    const raw = fs.readFileSync(file, 'utf8').trim();
+    return crypto.createHash('sha256').update('user-session:' + raw).digest();
+  } catch (err) {
+    console.warn('[server] Falha ao ler session-secret, gerando em memoria:', err.message);
+    return crypto.randomBytes(32);
+  }
+}
+
+const SESSION_SECRET = getSessionSecret();
+
+function signUserToken(userId) {
+  const payload = Buffer.from(JSON.stringify({ uid: userId, exp: Date.now() + USER_SESSION_MS })).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifyUserToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  if (!timingSafeStringEqual(sig, expected)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (typeof data.exp !== 'number' || data.exp <= Date.now()) return null;
+    return data.uid || null;
+  } catch { return null; }
+}
+
+function userCookie(value, maxAgeSec) {
+  const parts = [`${USER_COOKIE}=${value || ''}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
+  if (typeof maxAgeSec === 'number') parts.push(`Max-Age=${maxAgeSec}`);
+  return parts.join('; ');
+}
+
+function getRequestUserId(req) {
   const cookies = parseCookies(req.headers.cookie || '');
-  return url.searchParams.get('userId') || cookies.userId || getDefaultUserId();
+  return verifyUserToken(cookies[USER_COOKIE]);
+}
+
+function requireUserSession(req, res) {
+  const uid = getRequestUserId(req);
+  if (!uid) {
+    json(res, { error: 'nao autenticado' }, 401);
+    return null;
+  }
+  return uid;
 }
 
 function timingSafeStringEqual(a, b) {
@@ -134,10 +198,6 @@ function requireAdminApi(req, res) {
   return true;
 }
 
-function userCookie(userId) {
-  return `userId=${encodeURIComponent(userId)}; Path=/; SameSite=Lax; Max-Age=31536000`;
-}
-
 function maskConfig(config) {
   const masked = { ...config };
   const sensitiveKeys = ['GOOGLE_API_KEY', 'GOOGLE_OAUTH_CLIENT_SECRET', 'FOOTBALL_DATA_KEY'];
@@ -181,11 +241,9 @@ async function fetchGeminiModels(apiKey) {
 async function handleRequest(req, res, manager) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
-  const userId = getRequestUserId(req, url);
 
+  // ---------- Paginas HTML/JS/CSS (publicas) ----------
   if (pathname === '/' || pathname === '/setup' || pathname === '/status') {
-    await manager.getOrCreateCurrentUser(userId);
-    res.setHeader('Set-Cookie', userCookie(userId));
     return serveFile(res, path.join(WEB_DIR, 'index.html'), 'text/html; charset=utf-8');
   }
   if (pathname === '/admin') {
@@ -193,26 +251,6 @@ async function handleRequest(req, res, manager) {
   }
   if (pathname === '/web/admin.js') {
     return serveFile(res, path.join(WEB_DIR, 'admin.js'), 'application/javascript');
-  }
-
-  if (pathname === '/api/admin/login' && req.method === 'POST') {
-    if (!process.env.ADMIN_PASSWORD) return json(res, { error: 'admin desabilitado' }, 503);
-    const body = await readBody(req);
-    if (!timingSafeStringEqual(body.password || '', process.env.ADMIN_PASSWORD)) {
-      await new Promise(r => setTimeout(r, 400)); // anti brute-force
-      return json(res, { error: 'senha incorreta' }, 401);
-    }
-    const token = signAdminToken();
-    return json(res, { ok: true }, 200, { 'Set-Cookie': adminCookie(token, Math.floor(ADMIN_SESSION_MS / 1000)) });
-  }
-
-  if (pathname === '/api/admin/logout' && req.method === 'POST') {
-    return json(res, { ok: true }, 200, { 'Set-Cookie': adminCookie('', 0) });
-  }
-
-  if (pathname === '/api/admin/check' && req.method === 'GET') {
-    if (!process.env.ADMIN_PASSWORD) return json(res, { authed: false, enabled: false }, 200);
-    return json(res, { authed: isAdminAuthed(req), enabled: true }, 200);
   }
   if (pathname === '/tutorial') {
     return serveFile(res, path.join(WEB_DIR, 'tutorial.html'), 'text/html; charset=utf-8');
@@ -224,36 +262,135 @@ async function handleRequest(req, res, manager) {
     return serveFile(res, path.join(WEB_DIR, 'app.js'), 'application/javascript');
   }
 
+  // ---------- Rotas de admin (auth propria) ----------
+  if (pathname === '/api/admin/login' && req.method === 'POST') {
+    if (!process.env.ADMIN_PASSWORD) return json(res, { error: 'admin desabilitado' }, 503);
+    const body = await readBody(req);
+    if (!timingSafeStringEqual(body.password || '', process.env.ADMIN_PASSWORD)) {
+      await new Promise(r => setTimeout(r, 400));
+      return json(res, { error: 'senha incorreta' }, 401);
+    }
+    const token = signAdminToken();
+    return json(res, { ok: true }, 200, { 'Set-Cookie': adminCookie(token, Math.floor(ADMIN_SESSION_MS / 1000)) });
+  }
+  if (pathname === '/api/admin/logout' && req.method === 'POST') {
+    return json(res, { ok: true }, 200, { 'Set-Cookie': adminCookie('', 0) });
+  }
+  if (pathname === '/api/admin/check' && req.method === 'GET') {
+    if (!process.env.ADMIN_PASSWORD) return json(res, { authed: false, enabled: false }, 200);
+    return json(res, { authed: isAdminAuthed(req), enabled: true }, 200);
+  }
+
+  // ---------- Auth Google (login) ----------
+  if (pathname === '/auth/google/start') {
+    try {
+      const state = crypto.randomBytes(16).toString('hex');
+      const authUrl = getLoginAuthUrl(state);
+      res.writeHead(302, {
+        Location: authUrl,
+        'Set-Cookie': `oauthState=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`,
+      });
+      res.end();
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<h2>Erro</h2><p>${err.message}</p><a href="/">Voltar</a>`);
+    }
+    return;
+  }
+
+  if (pathname === '/auth/google/callback') {
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    const cookies = parseCookies(req.headers.cookie || '');
+    if (!code || !state || state !== cookies.oauthState) {
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<h2>Erro</h2><p>State invalido ou codigo ausente.</p><a href="/">Voltar</a>');
+      return;
+    }
+    try {
+      const { tokens, profile } = await exchangeCodeForLogin(code);
+      const email = String(profile.email || '').toLowerCase().trim();
+      const sub = profile.sub || profile.id || null;
+      if (!email) throw new Error('Conta Google nao retornou email.');
+
+      // Localiza usuario existente por sub > email; senao cria novo
+      let existing = (sub && await findUserByGoogleSub(sub)) || await findUserByEmail(email);
+      const userId = existing?.id || email;
+      const name = profile.name || profile.given_name || email.split('@')[0];
+
+      await ensureUser({ id: userId, name, email, googleSub: sub });
+      await saveGoogleTokens(userId, tokens);
+
+      const token = signUserToken(userId);
+      res.writeHead(302, {
+        Location: '/?connected=1',
+        'Set-Cookie': [
+          `oauthState=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+          userCookie(token, Math.floor(USER_SESSION_MS / 1000)),
+        ],
+      });
+      res.end();
+    } catch (err) {
+      console.error('[server] Falha no callback Google:', err);
+      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<h2>Erro ao entrar com Google</h2><p>${err.message}</p><a href="/">Voltar</a>`);
+    }
+    return;
+  }
+
+  if (pathname === '/auth/logout' && req.method === 'POST') {
+    return json(res, { ok: true }, 200, { 'Set-Cookie': userCookie('', 0) });
+  }
+
+  if (pathname === '/api/auth/check' && req.method === 'GET') {
+    const uid = getRequestUserId(req);
+    if (!uid) return json(res, { authed: false }, 200);
+    const user = await getUser(uid);
+    if (!user) return json(res, { authed: false }, 200, { 'Set-Cookie': userCookie('', 0) });
+    return json(res, { authed: true, userId: user.id, email: user.email, name: user.name });
+  }
+
+  // ---------- A partir daqui, todos os /api/* exigem sessao ----------
+
   if (pathname === '/api/session' && req.method === 'GET') {
-    const user = await manager.getOrCreateCurrentUser(userId);
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
+    const user = await getUser(uid);
+    if (!user) {
+      return json(res, { error: 'usuario nao existe' }, 404, { 'Set-Cookie': userCookie('', 0) });
+    }
     return json(res, {
       userId: user.id,
       name: user.name,
+      email: user.email,
       assistantChatId: user.assistant_chat_id,
       calendarId: user.calendar_id,
       timezone: user.timezone,
-    }, 200, { 'Set-Cookie': userCookie(user.id) });
+    });
   }
 
   if (pathname === '/api/config' && req.method === 'GET') {
+    // GET continua publico — so retorna config global mascarada que o admin precisa
+    // (mas o app.js so chama isso depois do login, entao na pratica fica protegido pela UI)
     return json(res, maskConfig(getConfig()));
   }
 
   if (pathname === '/api/config' && req.method === 'POST') {
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
+    const user = await getUser(uid);
+    if (!user) return json(res, { error: 'usuario nao existe' }, 404);
+
     const body = await readBody(req);
-    const user = await manager.getOrCreateCurrentUser(userId);
-    // Chaves sensiveis de plataforma — so podem ser alteradas via /api/admin/config (com auth)
     const sensitivePlatformKeys = new Set([
       'GOOGLE_API_KEY', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
       'OAUTH_REDIRECT_URI', 'GEMINI_MODEL',
     ]);
-    // Chaves de plataforma que usuarios podem ajustar (lembrete, fuso)
     const userPlatformKeys = ['REMINDER_MINUTES', 'DEFAULT_TIMEZONE', 'FOOTBALL_DATA_KEY'];
     const update = {};
     for (const key of userPlatformKeys) {
       if (body[key] !== undefined && body[key] !== '') update[key] = body[key];
     }
-    // Silently drop sensitive keys se chegaram aqui
     for (const key of Object.keys(body)) {
       if (sensitivePlatformKeys.has(key)) {
         console.warn(`[server] Tentativa de set chave sensivel ${key} via /api/config bloqueada`);
@@ -328,36 +465,40 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/calendars' && req.method === 'GET') {
-    const user = await manager.getOrCreateCurrentUser(userId);
-    const currentUser = await getUser(user.id);
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
+    const currentUser = await getUser(uid);
     try {
-      return json(res, { calendars: await listCalendars(user.id), selectedCalendarId: currentUser?.calendar_id || 'primary' });
+      return json(res, { calendars: await listCalendars(uid), selectedCalendarId: currentUser?.calendar_id || 'primary' });
     } catch (error) {
       return json(res, { error: error.message, calendars: [] }, 400);
     }
   }
 
   if (pathname === '/api/calendar/select' && req.method === 'POST') {
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
     const body = await readBody(req);
-    const user = await manager.getOrCreateCurrentUser(userId);
     const calendarId = body.GOOGLE_CALENDAR_ID || 'primary';
-    await updateUserSettings(user.id, { calendarId });
+    await updateUserSettings(uid, { calendarId });
     return json(res, { ok: true, calendarId });
   }
 
   if (pathname === '/api/status') {
-    const user = await manager.getOrCreateCurrentUser(userId);
-    const currentUser = await getUser(user.id);
-    const whatsappStatus = await manager.getWhatsAppStatus(user.id);
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
+    const currentUser = await getUser(uid);
+    if (!currentUser) return json(res, { error: 'usuario nao existe' }, 404, { 'Set-Cookie': userCookie('', 0) });
+    const whatsappStatus = await manager.getWhatsAppStatus(uid);
     const config = getConfig();
     const platformConfigured = isPlatformConfigured();
     return json(res, {
-      userId: user.id,
+      userId: currentUser.id,
       configComplete: platformConfigured && !!currentUser?.assistant_chat_id,
       platformConfigured,
       hasGeminiKey: !!config.GOOGLE_API_KEY,
       hasOAuthCredentials: !!(config.GOOGLE_OAUTH_CLIENT_ID && config.GOOGLE_OAUTH_CLIENT_SECRET),
-      calendarConnected: await isGoogleConnected(user.id),
+      calendarConnected: await isGoogleConnected(uid),
       hasPhone: !!currentUser?.assistant_chat_id,
       botStatus: whatsappStatus.status,
       qrAvailable: whatsappStatus.qrAvailable,
@@ -366,21 +507,23 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/qr') {
-    const user = await manager.getOrCreateCurrentUser(userId);
-    const latestQrString = await getLatestQr(user.id);
-    if (!latestQrString) return json(res, { qr: null, userId: user.id });
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
+    const latestQrString = await getLatestQr(uid);
+    if (!latestQrString) return json(res, { qr: null, userId: uid });
     try {
       const svg = await qrcode.toString(latestQrString, { type: 'svg' });
-      return json(res, { qr: svg, userId: user.id });
+      return json(res, { qr: svg, userId: uid });
     } catch {
-      return json(res, { qr: null, userId: user.id });
+      return json(res, { qr: null, userId: uid });
     }
   }
 
   if (pathname === '/api/user/pause' && req.method === 'POST') {
-    const user = await manager.getOrCreateCurrentUser(userId);
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
     try {
-      await manager.pauseWhatsAppInstance(user.id);
+      await manager.pauseWhatsAppInstance(uid);
       return json(res, { ok: true });
     } catch (err) {
       return json(res, { error: err.message }, 500);
@@ -388,9 +531,10 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/user/resume' && req.method === 'POST') {
-    const user = await manager.getOrCreateCurrentUser(userId);
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
     try {
-      manager.startWhatsAppInstance(user.id).catch(err => console.error('[server] Erro ao retomar bot:', err));
+      manager.startWhatsAppInstance(uid).catch(err => console.error('[server] Erro ao retomar bot:', err));
       return json(res, { ok: true });
     } catch (err) {
       return json(res, { error: err.message }, 500);
@@ -398,11 +542,11 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/user/switch-number' && req.method === 'POST') {
-    const user = await manager.getOrCreateCurrentUser(userId);
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
     try {
-      await manager.logoutWhatsAppInstance(user.id);
-      // Limpa o telefone do usuario para que ele complete o step 2 de novo
-      await manager.updateUserSettings(user.id, { assistantChatId: null });
+      await manager.logoutWhatsAppInstance(uid);
+      await manager.updateUserSettings(uid, { assistantChatId: null });
       return json(res, { ok: true });
     } catch (err) {
       return json(res, { error: err.message }, 500);
@@ -410,23 +554,28 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/user/delete' && req.method === 'POST') {
-    const user = await manager.getOrCreateCurrentUser(userId);
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
     try {
-      await manager.logoutWhatsAppInstance(user.id);
-      await manager.deleteUser(user.id);
-      // Limpa cookie do usuario
-      res.setHeader('Set-Cookie', `userId=; Path=/; SameSite=Lax; Max-Age=0`);
-      return json(res, { ok: true });
+      await manager.logoutWhatsAppInstance(uid);
+      await manager.deleteUser(uid);
+      return json(res, { ok: true }, 200, { 'Set-Cookie': userCookie('', 0) });
     } catch (err) {
       return json(res, { error: err.message }, 500);
     }
   }
 
+  // ---------- Reconnect manual do Calendar (mantem usuario logado) ----------
   if (pathname === '/oauth/start') {
+    const uid = getRequestUserId(req);
+    if (!uid) {
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<h2>Nao autenticado</h2><a href="/">Entrar</a>');
+      return;
+    }
     try {
-      const user = await manager.getOrCreateCurrentUser(userId);
-      const authUrl = getAuthUrl(user.id);
-      res.writeHead(302, { Location: authUrl, 'Set-Cookie': userCookie(user.id) });
+      const authUrl = getAuthUrl(uid);
+      res.writeHead(302, { Location: authUrl });
       res.end();
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -437,16 +586,21 @@ async function handleRequest(req, res, manager) {
 
   if (pathname === '/oauth/callback') {
     const code = url.searchParams.get('code');
-    const callbackUserId = url.searchParams.get('state') || userId;
-    if (!code) {
+    const callbackUserId = url.searchParams.get('state');
+    if (!code || !callbackUserId) {
       res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<h2>Erro</h2><p>Codigo de autorizacao nao recebido.</p><a href="/">Voltar</a>');
+      res.end('<h2>Erro</h2><p>Codigo de autorizacao ausente.</p><a href="/">Voltar</a>');
       return;
     }
     try {
-      await manager.getOrCreateCurrentUser(callbackUserId);
+      const existing = await getUser(callbackUserId);
+      if (!existing) {
+        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<h2>Usuario nao encontrado</h2><a href="/">Voltar</a>');
+        return;
+      }
       await exchangeCodeForTokens(code, callbackUserId);
-      res.writeHead(302, { Location: '/?connected=1', 'Set-Cookie': userCookie(callbackUserId) });
+      res.writeHead(302, { Location: '/?connected=1' });
       res.end();
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });

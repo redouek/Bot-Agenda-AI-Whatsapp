@@ -254,11 +254,13 @@ function closeCountryList() {
 }
 
 function show(sectionId) {
-  ['section-setup', 'section-qr', 'section-ready', 'section-disconnected'].forEach(id => {
+  ['section-login', 'section-setup', 'section-qr', 'section-ready', 'section-disconnected'].forEach(id => {
     const el = $(id);
     if (el) el.classList.add('hidden');
   });
-  $(sectionId).classList.remove('hidden');
+  $(sectionId)?.classList.remove('hidden');
+  const stepper = $('stepper');
+  if (stepper) stepper.classList.toggle('hidden', sectionId !== 'section-setup');
 }
 
 function showStep(step) {
@@ -642,6 +644,12 @@ async function renderQr() {
 async function pollStatus() {
   try {
     const res = await fetch(apiPath('/api/status'));
+    if (res.status === 401) {
+      // Sessao expirou — volta para login
+      show('section-login');
+      $('user-info').classList.add('hidden');
+      return;
+    }
     const status = await res.json();
     currentStatus = status;
     if (status.userId) currentUserId = status.userId;
@@ -721,28 +729,28 @@ function updateOAuthButton(config = {}) {
   const msg = $('calendar-status-msg');
 
   if (currentStatus?.calendarConnected) {
-    if (msg) msg.textContent = 'Google Calendar conectado.';
+    if (msg) msg.textContent = 'Google Calendar conectado pela sua conta.';
     if (btn) {
       btn.textContent = 'Reconectar Google';
       btn.disabled = !hasCredentials;
     }
     if (mainBtn) {
       mainBtn.textContent = 'Google conectado';
-      mainBtn.disabled = false;
+      mainBtn.disabled = true;
     }
   } else if (hasCredentials) {
-    if (msg) msg.textContent = 'Pronto para conectar.';
+    if (msg) msg.textContent = 'Reconecte para autorizar acesso ao Calendar.';
     if (btn) btn.disabled = false;
     if (mainBtn) {
-      mainBtn.textContent = 'Conectar Google';
+      mainBtn.textContent = 'Reconectar Calendar';
       mainBtn.disabled = false;
     }
   } else {
-    if (msg) msg.textContent = 'Conecte sua conta Google para continuar.';
+    if (msg) msg.textContent = 'Plataforma ainda nao configurada.';
     if (btn) btn.disabled = true;
     if (mainBtn) {
       mainBtn.textContent = 'Aguardando ativacao';
-      mainBtn.disabled = false;
+      mainBtn.disabled = true;
     }
   }
 }
@@ -898,10 +906,37 @@ if (new URLSearchParams(location.search).get('connected') === '1') {
   showStep(1);
 }
 
+async function checkAuthAndBoot() {
+  try {
+    const res = await fetch('/api/auth/check', { credentials: 'include' });
+    const data = await res.json();
+    if (!data.authed) {
+      show('section-login');
+      $('status-label').textContent = 'Nao conectado';
+      return false;
+    }
+    $('user-info').classList.remove('hidden');
+    $('user-email').textContent = data.email || data.userId;
+    return true;
+  } catch {
+    show('section-login');
+    return false;
+  }
+}
+
+$('btn-logout')?.addEventListener('click', async () => {
+  await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+  location.href = '/';
+});
+
 async function boot() {
   renderCountryOptions();
   renderTimezoneOptions();
   selectCountryByDdi('55');
+
+  const authed = await checkAuthAndBoot();
+  if (!authed) return;
+
   showStep(1);
   await loadSession();
   await loadCurrentConfig();

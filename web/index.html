@@ -37,17 +37,42 @@
           <p class="eyebrow">Onboarding</p>
           <h2>Vamos configurar sua assistente</h2>
         </div>
-        <div class="status-pill">Status: <span id="status-label">Verificando...</span></div>
+        <div class="topbar-actions">
+          <div class="status-pill">Status: <span id="status-label">Verificando...</span></div>
+          <span id="user-info" class="user-info hidden">
+            <span id="user-email"></span>
+            <button type="button" class="btn-ghost" id="btn-logout">Sair</button>
+          </span>
+        </div>
       </header>
 
-      <nav class="stepper" aria-label="Etapas">
+      <section id="section-login" class="panel hidden">
+        <div class="panel-heading">
+          <p class="eyebrow">Acesso</p>
+          <h3>Entre com a sua conta Google</h3>
+        </div>
+        <p class="login-copy">Usamos a sua conta Google para te identificar e tambem para conectar a sua agenda. Voce autoriza tudo em um unico clique.</p>
+        <div class="form-footer">
+          <a class="btn-primary btn-google" href="/auth/google/start">
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+              <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.17-1.84H9v3.48h4.84c-.21 1.13-.85 2.09-1.82 2.73v2.27h2.95c1.72-1.59 2.72-3.92 2.72-6.64z"/>
+              <path fill="#34A853" d="M9 18c2.45 0 4.5-.81 6-2.19l-2.94-2.27c-.81.54-1.85.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.96v2.34A9 9 0 0 0 9 18z"/>
+              <path fill="#FBBC05" d="M3.95 10.68A5.4 5.4 0 0 1 3.66 9c0-.58.1-1.15.29-1.68V4.98H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.02l2.99-2.34z"/>
+              <path fill="#EA4335" d="M9 3.58c1.32 0 2.51.45 3.44 1.35l2.61-2.6C13.5.89 11.45 0 9 0A9 9 0 0 0 .96 4.98l2.99 2.34C4.66 5.18 6.65 3.58 9 3.58z"/>
+            </svg>
+            <span>Entrar com Google</span>
+          </a>
+        </div>
+      </section>
+
+      <nav class="stepper hidden" id="stepper" aria-label="Etapas">
         <button class="step-tab active" type="button" data-step="1"><span>1</span> Agenda</button>
         <button class="step-tab" type="button" data-step="2"><span>2</span> WhatsApp</button>
         <button class="step-tab" type="button" data-step="3"><span>3</span> Extras</button>
         <button class="step-tab" type="button" data-step="4"><span>4</span> Pronto</button>
       </nav>
 
-      <section id="section-setup" class="panel">
+      <section id="section-setup" class="panel hidden">
         <form id="form-setup">
           <div class="step-page active" data-step-page="1">
             <div class="panel-heading">
