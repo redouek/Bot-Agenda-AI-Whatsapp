@@ -11,6 +11,16 @@ const botSentBodies = new Set();
 const reminderIntervals = new Map();
 const pollIntervals = new Map();
 const selfChatLidByUser = new Map();
+const sessionStartTimes = new Map();
+
+export function setSessionStart(userId, ts = Date.now()) {
+  sessionStartTimes.set(userId, ts);
+  console.log(`[bot:${userId}] sessao iniciada em ${new Date(ts).toISOString()} — mensagens anteriores serao ignoradas.`);
+}
+
+export function clearSessionStart(userId) {
+  sessionStartTimes.delete(userId);
+}
 
 function userScopedKey(userId, value) {
   return `${userId}:${value}`;
@@ -291,6 +301,14 @@ export async function processIncomingMessage(userId, client, message) {
   const isSelfChat = rawChatId === CHAT_ID || (selfLid && rawChatId === selfLid);
   if (!isSelfChat) return;
 
+  // Ignora mensagens enviadas ANTES da sessao atual ficar pronta
+  // (evita que retomar de pausa reprocesse mensagens do periodo offline).
+  const sessionStart = sessionStartTimes.get(userId);
+  if (sessionStart && message.timestamp) {
+    const msgTs = message.timestamp * 1000;
+    if (msgTs < sessionStart) return;
+  }
+
   // Normaliza para CHAT_ID em todos os usos downstream (pendingActions, replies, etc.)
   const chatId = CHAT_ID;
 
@@ -452,7 +470,8 @@ export function stopReminderLoop(userId) {
 export function startSelfChatPolling(userId, client) {
   if (pollIntervals.has(userId)) return;
 
-  let lastSeenTs = Date.now() - 60000;
+  // Comeca a partir do instante atual: ignora mensagens da janela offline anterior
+  let lastSeenTs = sessionStartTimes.get(userId) || Date.now();
 
   // Acessa o self-chat no modo multi-device.
   // O Mensagens Salvas usa o LID do próprio usuário como chat ID (não @c.us).
@@ -547,6 +566,7 @@ export function startSelfChatPolling(userId, client) {
           fromMe: raw.fromMe,
           body: raw.body,
           type: raw.type || 'chat',
+          timestamp: raw.timestamp,
           hasMedia: false,
           getChat: async () => ({
             id: { _serialized: CHAT_ID },

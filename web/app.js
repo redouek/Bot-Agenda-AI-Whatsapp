@@ -5,6 +5,7 @@ let latestConfig = {};
 let calendarsLoaded = false;
 let finalizingSetup = false;
 let selfChatConfirmed = false;
+let editingConfig = false;
 
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('.step-tab'));
@@ -661,7 +662,8 @@ async function pollStatus() {
 
     if (status.botStatus === 'ready' || status.botStatus === 'paused') {
       // Usuario configurado — tela principal vira o painel de gestao
-      if (status.hasPhone || finalizingSetup) {
+      // (a menos que esteja editando configuracoes propositalmente)
+      if ((status.hasPhone || finalizingSetup) && !editingConfig) {
         show('section-ready');
         updateReadyView(status);
         updateCalendarStatus(status.calendarConnected);
@@ -849,6 +851,7 @@ $('form-setup').addEventListener('submit', async (e) => {
 
   try {
     finalizingSetup = true;
+    editingConfig = false;
     await saveConfig();
     const feedback = $('save-feedback');
     feedback.classList.remove('hidden');
@@ -884,6 +887,7 @@ $('btn-oauth-main').addEventListener('click', async () => {
 });
 
 window.showSetup = function () {
+  editingConfig = true;
   show('section-setup');
   showStep(1);
   loadCurrentConfig();

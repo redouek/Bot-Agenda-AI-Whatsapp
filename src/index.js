@@ -2,7 +2,7 @@ import fs from 'fs';
 import pkg from 'whatsapp-web.js';
 import { loadConfig, isPlatformConfigured } from './config.js';
 import { startServer } from './server.js';
-import { processIncomingMessage, processReaction, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb } from './bot.js';
+import { processIncomingMessage, processReaction, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
 import {
   deleteUser,
   ensureUser,
@@ -109,6 +109,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     console.log(`[bot:${user.id}] WhatsApp pronto.`);
     runtime.status = 'ready';
     runtime.qr = null;
+    setSessionStart(user.id);
     await updateWhatsAppSession(user.id, {
       status: 'ready',
       latestQr: null,
@@ -131,6 +132,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     runtime.qr = null;
     stopReminderLoop(user.id);
     stopSelfChatPolling(user.id);
+    clearSessionStart(user.id);
     await updateWhatsAppSession(user.id, { status: 'disconnected', latestQr: null, sessionPath });
   });
 
@@ -181,6 +183,7 @@ export async function stopWhatsAppInstance(userId = getDefaultUserId(), finalSta
 
   stopReminderLoop(userId);
   stopSelfChatPolling(userId);
+  clearSessionStart(userId);
   whatsappInstances.delete(userId);
   await updateWhatsAppSession(userId, { status: finalStatus, latestQr: null });
 }
@@ -203,6 +206,7 @@ export async function logoutWhatsAppInstance(userId = getDefaultUserId()) {
   }
   stopReminderLoop(userId);
   stopSelfChatPolling(userId);
+  clearSessionStart(userId);
   whatsappInstances.delete(userId);
 
   // Remove arquivos da sessao em disco
