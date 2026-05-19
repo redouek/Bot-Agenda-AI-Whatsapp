@@ -2,7 +2,7 @@ import { planConversationTurn } from './gemini.js';
 import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminders } from './calendar.js';
 import { runLookup } from './knowledge.js';
 import { getConfig } from './config.js';
-import { getUser } from './database.js';
+import { getUser, updateUserSettings } from './database.js';
 
 const pendingActions = new Map();
 const processedMessageIds = new Set();
@@ -42,6 +42,14 @@ function getTimeZone() {
 async function getAssistantChatId(userId) {
   const user = await getUser(userId);
   return user?.assistant_chat_id || '';
+}
+
+export async function hydrateSelfChatLidFromDb(userId) {
+  const user = await getUser(userId);
+  if (user?.self_chat_lid) {
+    selfChatLidByUser.set(userId, user.self_chat_lid);
+    console.log(`[bot:${userId}] LID self-chat carregado do banco: ${user.self_chat_lid}`);
+  }
 }
 
 function formatSingleEvent(event) {
@@ -456,6 +464,9 @@ export function startSelfChatPolling(userId, client) {
     if (result?.userLid && selfChatLidByUser.get(userId) !== result.userLid) {
       selfChatLidByUser.set(userId, result.userLid);
       console.log(`[poll:${userId}] LID do self-chat registrado: ${result.userLid}`);
+      updateUserSettings(userId, { selfChatLid: result.userLid }).catch(err => {
+        console.warn(`[poll:${userId}] Falha ao persistir LID:`, err?.message);
+      });
     }
   };
 

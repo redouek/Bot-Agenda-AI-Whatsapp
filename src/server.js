@@ -10,7 +10,9 @@ import {
   getLatestQr,
   getUser,
   isGoogleConnected,
+  listUsers,
   updateUserSettings,
+  getWhatsAppSession,
 } from './database.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -173,6 +175,27 @@ async function handleRequest(req, res, manager) {
     }
 
     return json(res, { ok: true, userId: user.id });
+  }
+
+  if (pathname === '/api/admin/users' && req.method === 'GET') {
+    const users = await listUsers();
+    const enriched = await Promise.all(users.map(async u => {
+      const session = await getWhatsAppSession(u.id).catch(() => null);
+      const runtime = manager.getWhatsAppStatus ? await manager.getWhatsAppStatus(u.id).catch(() => null) : null;
+      return {
+        id: u.id,
+        name: u.name,
+        phone: u.assistant_chat_id || null,
+        selfChatLid: u.self_chat_lid || null,
+        calendarId: u.calendar_id || null,
+        calendarConnected: await isGoogleConnected(u.id),
+        botStatus: runtime?.status || session?.status || 'stopped',
+        lastReadyAt: session?.last_ready_at || null,
+        createdAt: u.created_at,
+        updatedAt: u.updated_at,
+      };
+    }));
+    return json(res, { users: enriched });
   }
 
   if (pathname === '/api/gemini/models' && req.method === 'POST') {

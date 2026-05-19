@@ -2,7 +2,7 @@ import fs from 'fs';
 import pkg from 'whatsapp-web.js';
 import { loadConfig, isPlatformConfigured } from './config.js';
 import { startServer } from './server.js';
-import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling } from './bot.js';
+import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb } from './bot.js';
 import {
   ensureUser,
   getDefaultUserId,
@@ -59,6 +59,8 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
 
   const sessionPath = getWhatsAppSessionPath(user.id);
   ensureDir(sessionPath);
+
+  await hydrateSelfChatLidFromDb(user.id);
 
   await updateWhatsAppSession(user.id, {
     status: 'initializing',

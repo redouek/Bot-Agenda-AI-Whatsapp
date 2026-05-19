@@ -94,7 +94,25 @@
               <h3>Seu WhatsApp</h3>
             </div>
 
-            <div class="phone-grid">
+            <div id="selfchat-gate" class="selfchat-gate">
+              <div class="selfchat-instructions">
+                <p class="eyebrow">Passo necessario</p>
+                <h4>Envie uma mensagem para voce mesmo no WhatsApp</h4>
+                <p class="selfchat-copy">
+                  Antes de continuar, abra o WhatsApp e mande uma mensagem para o seu proprio contato.
+                  Esse passo e necessario para que o bot consiga identificar sua conversa "Mensagens Salvas".
+                </p>
+                <ol class="selfchat-steps">
+                  <li>Abra o WhatsApp no celular.</li>
+                  <li>Toque na lupa de busca e digite o seu proprio nome.</li>
+                  <li>Selecione seu contato (aparece como "<strong>Nome (Voce)</strong>").</li>
+                  <li>Envie qualquer mensagem, por exemplo: "<em>oi</em>".</li>
+                </ol>
+                <button type="button" class="btn-primary" id="btn-selfchat-confirm">Ja enviei a mensagem</button>
+              </div>
+            </div>
+
+            <div id="phone-fields" class="phone-grid hidden">
               <label class="field">
                 <span>Pais</span>
                 <input type="hidden" name="WHATSAPP_DDI" id="whatsapp-ddi" value="55" />

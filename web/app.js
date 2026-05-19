@@ -4,6 +4,7 @@ let currentStep = 1;
 let latestConfig = {};
 let calendarsLoaded = false;
 let finalizingSetup = false;
+let selfChatConfirmed = false;
 
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('.step-tab'));
@@ -435,11 +436,25 @@ function validateStep(step) {
     alert('Conecte sua agenda Google para continuar.');
     return false;
   }
-  if (step === 2 && (!data.WHATSAPP_NUMBER || data.WHATSAPP_NUMBER.length < 10) && !currentStatus?.hasPhone) {
-    alert('Digite seu numero de WhatsApp.');
-    return false;
+  if (step === 2) {
+    if (!selfChatConfirmed && !currentStatus?.hasPhone) {
+      alert('Confirme primeiro que voce ja enviou uma mensagem para o seu proprio contato no WhatsApp.');
+      return false;
+    }
+    if ((!data.WHATSAPP_NUMBER || data.WHATSAPP_NUMBER.length < 10) && !currentStatus?.hasPhone) {
+      alert('Digite seu numero de WhatsApp.');
+      return false;
+    }
   }
   return true;
+}
+
+function revealPhoneFields() {
+  selfChatConfirmed = true;
+  const gate = $('selfchat-gate');
+  const fields = $('phone-fields');
+  if (gate) gate.classList.add('hidden');
+  if (fields) fields.classList.remove('hidden');
 }
 
 async function loadSession() {
@@ -452,6 +467,8 @@ async function loadSession() {
       const phone = splitPhoneByDdi(session.assistantChatId);
       selectCountryByDdi(phone.ddi);
       form.elements.WHATSAPP_NUMBER.value = formatPhone(phone.number || chatIdToPhone(session.assistantChatId));
+      // Usuario ja tinha cadastrado o numero antes — pula o gate
+      revealPhoneFields();
     }
     if (session.calendarId && form.elements.GOOGLE_CALENDAR_ID) {
       form.elements.GOOGLE_CALENDAR_ID.value = session.calendarId;
@@ -644,6 +661,8 @@ $('btn-next').addEventListener('click', async () => {
 $('btn-prev').addEventListener('click', () => {
   showStep(currentStep - 1);
 });
+
+$('btn-selfchat-confirm')?.addEventListener('click', revealPhoneFields);
 
 $('btn-load-models')?.addEventListener('click', loadGeminiModels);
 $('btn-load-calendars').addEventListener('click', () => {

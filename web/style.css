@@ -391,6 +391,64 @@ input:focus, select:focus {
 .notice strong, .soft-note strong { color: var(--ink); }
 .soft-note { margin-bottom: 14px; }
 
+.selfchat-gate {
+  margin-bottom: 16px;
+}
+.selfchat-instructions {
+  background: var(--mint);
+  border: 1px solid rgba(24, 160, 88, .28);
+  border-radius: 10px;
+  padding: 20px 22px;
+  display: grid;
+  gap: 12px;
+}
+.selfchat-instructions h4 {
+  font-size: 18px;
+  color: var(--ink);
+}
+.selfchat-copy {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.selfchat-steps {
+  margin-left: 20px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.selfchat-steps li { margin-bottom: 2px; }
+.selfchat-instructions .btn-primary {
+  justify-self: start;
+  margin-top: 6px;
+}
+
+.users-status { margin-bottom: 12px; }
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.users-table th, .users-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.users-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.users-table small { color: var(--muted); }
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.badge.ok { background: var(--mint); color: var(--green-dark); }
+.badge.warn { background: #fff4d9; color: var(--amber); }
+
 .helper { margin-top: 4px; margin-bottom: 18px; color: var(--muted); }
 .helper summary { color: var(--ink); cursor: pointer; font-weight: 760; }
 .helper ol { padding-left: 20px; margin-top: 12px; line-height: 1.65; }

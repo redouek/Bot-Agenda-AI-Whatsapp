@@ -52,6 +52,7 @@ export async function initDatabase() {
       email TEXT,
       calendar_id TEXT,
       assistant_chat_id TEXT,
+      self_chat_lid TEXT,
       timezone TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -81,6 +82,13 @@ export async function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
+
+  // Migration: adiciona self_chat_lid em bancos antigos
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN self_chat_lid TEXT');
+  } catch {
+    // Coluna ja existe — segue o jogo
+  }
 
   await ensureUser({
     id: DEFAULT_USER_ID,
@@ -149,16 +157,17 @@ export async function updateUserSettings(userId, settings = {}) {
     email: settings.email ?? current.email,
     calendar_id: settings.calendarId ?? settings.calendar_id ?? current.calendar_id,
     assistant_chat_id: settings.assistantChatId ?? settings.assistant_chat_id ?? current.assistant_chat_id,
+    self_chat_lid: settings.selfChatLid ?? settings.self_chat_lid ?? current.self_chat_lid,
     timezone: settings.timezone ?? current.timezone,
   };
 
   await db.run(
     `
       UPDATE users
-      SET name = ?, email = ?, calendar_id = ?, assistant_chat_id = ?, timezone = ?, updated_at = ?
+      SET name = ?, email = ?, calendar_id = ?, assistant_chat_id = ?, self_chat_lid = ?, timezone = ?, updated_at = ?
       WHERE id = ?
     `,
-    [next.name, next.email, next.calendar_id, next.assistant_chat_id, next.timezone, nowIso(), id]
+    [next.name, next.email, next.calendar_id, next.assistant_chat_id, next.self_chat_lid, next.timezone, nowIso(), id]
   );
 
   return getUser(id);
