@@ -68,6 +68,32 @@ a:hover { text-decoration: underline; }
   letter-spacing: .02em;
 }
 
+.brand-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.btn-admin-access {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .25);
+  border-radius: 999px;
+  padding: 6px 14px;
+  text-decoration: none;
+  transition: background .15s ease;
+}
+.btn-admin-access:hover {
+  background: rgba(255, 255, 255, .22);
+  text-decoration: none;
+}
+
 .eyebrow {
   color: var(--green);
   font-size: .76rem;
@@ -579,6 +605,14 @@ button:disabled { opacity: .48; cursor: not-allowed; }
   font-weight: 760;
 }
 
+.feedback-err {
+  margin-top: 10px;
+  color: #c0383b;
+  font-weight: 760;
+}
+
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+
 .loading { color: var(--muted); font-style: italic; }
 
 .status-grid {
@@ -699,6 +733,7 @@ footer {
 
   .brand-mark, .brand-panel .eyebrow, .brand-copy { display: none; }
   .brand-panel h1 { font-size: 1.35rem; margin: 0; }
+  .brand-header { margin-bottom: 0; justify-content: flex-end; }
 
   .topbar {
     flex-direction: row;

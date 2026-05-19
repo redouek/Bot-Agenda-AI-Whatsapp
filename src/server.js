@@ -1,6 +1,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import qrcode from 'qrcode';
 import { getConfig, setConfig, isPlatformConfigured } from './config.js';
@@ -60,38 +61,61 @@ function getRequestUserId(req, url) {
   return url.searchParams.get('userId') || cookies.userId || getDefaultUserId();
 }
 
-function timingSafeEqual(a, b) {
+function timingSafeStringEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i += 1) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return mismatch === 0;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-function checkAdminAuth(req, res) {
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected) {
-    res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end('<h2>Admin desabilitado</h2><p>Defina ADMIN_PASSWORD no bot.env e reinicie o container para ativar o painel admin.</p>');
+const ADMIN_COOKIE = 'adminSession';
+const ADMIN_SESSION_MS = 12 * 60 * 60 * 1000;
+
+function getAdminSecret() {
+  const pw = process.env.ADMIN_PASSWORD;
+  if (!pw) return null;
+  return crypto.createHash('sha256').update('admin-session:' + pw).digest();
+}
+
+function signAdminToken() {
+  const secret = getAdminSecret();
+  if (!secret) return null;
+  const payload = Buffer.from(JSON.stringify({ exp: Date.now() + ADMIN_SESSION_MS })).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function verifyAdminToken(token) {
+  if (!token || typeof token !== 'string') return false;
+  const secret = getAdminSecret();
+  if (!secret) return false;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return false;
+  const expected = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  if (!timingSafeStringEqual(sig, expected)) return false;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return typeof data.exp === 'number' && data.exp > Date.now();
+  } catch { return false; }
+}
+
+function isAdminAuthed(req) {
+  const cookies = parseCookies(req.headers.cookie || '');
+  return verifyAdminToken(cookies[ADMIN_COOKIE]);
+}
+
+function adminCookie(value, maxAgeSec) {
+  const parts = [`${ADMIN_COOKIE}=${value || ''}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
+  if (typeof maxAgeSec === 'number') parts.push(`Max-Age=${maxAgeSec}`);
+  return parts.join('; ');
+}
+
+// Gate para endpoints de API admin — responde 401 JSON ou 503 se admin desabilitado.
+function requireAdminApi(req, res) {
+  if (!process.env.ADMIN_PASSWORD) {
+    json(res, { error: 'admin desabilitado' }, 503);
     return false;
   }
-  const header = req.headers.authorization || '';
-  if (!header.startsWith('Basic ')) {
-    res.writeHead(401, {
-      'WWW-Authenticate': 'Basic realm="Admin", charset="UTF-8"',
-      'Content-Type': 'text/plain; charset=utf-8',
-    });
-    res.end('Autenticacao necessaria');
-    return false;
-  }
-  let decoded = '';
-  try { decoded = Buffer.from(header.slice(6), 'base64').toString('utf8'); } catch {}
-  const password = decoded.includes(':') ? decoded.slice(decoded.indexOf(':') + 1) : decoded;
-  if (!timingSafeEqual(password, expected)) {
-    res.writeHead(401, {
-      'WWW-Authenticate': 'Basic realm="Admin", charset="UTF-8"',
-      'Content-Type': 'text/plain; charset=utf-8',
-    });
-    res.end('Senha incorreta');
+  if (!isAdminAuthed(req)) {
+    json(res, { error: 'nao autenticado' }, 401);
     return false;
   }
   return true;
@@ -152,12 +176,30 @@ async function handleRequest(req, res, manager) {
     return serveFile(res, path.join(WEB_DIR, 'index.html'), 'text/html; charset=utf-8');
   }
   if (pathname === '/admin') {
-    if (!checkAdminAuth(req, res)) return;
     return serveFile(res, path.join(WEB_DIR, 'admin.html'), 'text/html; charset=utf-8');
   }
   if (pathname === '/web/admin.js') {
-    if (!checkAdminAuth(req, res)) return;
     return serveFile(res, path.join(WEB_DIR, 'admin.js'), 'application/javascript');
+  }
+
+  if (pathname === '/api/admin/login' && req.method === 'POST') {
+    if (!process.env.ADMIN_PASSWORD) return json(res, { error: 'admin desabilitado' }, 503);
+    const body = await readBody(req);
+    if (!timingSafeStringEqual(body.password || '', process.env.ADMIN_PASSWORD)) {
+      await new Promise(r => setTimeout(r, 400)); // anti brute-force
+      return json(res, { error: 'senha incorreta' }, 401);
+    }
+    const token = signAdminToken();
+    return json(res, { ok: true }, 200, { 'Set-Cookie': adminCookie(token, Math.floor(ADMIN_SESSION_MS / 1000)) });
+  }
+
+  if (pathname === '/api/admin/logout' && req.method === 'POST') {
+    return json(res, { ok: true }, 200, { 'Set-Cookie': adminCookie('', 0) });
+  }
+
+  if (pathname === '/api/admin/check' && req.method === 'GET') {
+    if (!process.env.ADMIN_PASSWORD) return json(res, { authed: false, enabled: false }, 200);
+    return json(res, { authed: isAdminAuthed(req), enabled: true }, 200);
   }
   if (pathname === '/tutorial') {
     return serveFile(res, path.join(WEB_DIR, 'tutorial.html'), 'text/html; charset=utf-8');
@@ -225,7 +267,7 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/admin/config' && req.method === 'POST') {
-    if (!checkAdminAuth(req, res)) return;
+    if (!requireAdminApi(req, res)) return;
     const body = await readBody(req);
     const platformKeys = [
       'GOOGLE_API_KEY', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
@@ -241,7 +283,7 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/admin/users' && req.method === 'GET') {
-    if (!checkAdminAuth(req, res)) return;
+    if (!requireAdminApi(req, res)) return;
     const users = await listUsers();
     const enriched = await Promise.all(users.map(async u => {
       const session = await getWhatsAppSession(u.id).catch(() => null);

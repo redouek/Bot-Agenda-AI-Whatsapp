@@ -2,6 +2,13 @@ const form = document.getElementById('admin-form');
 const feedback = document.getElementById('admin-feedback');
 const usersStatus = document.getElementById('users-status');
 const refreshUsersBtn = document.getElementById('btn-refresh-users');
+const loginSection = document.getElementById('admin-login');
+const loginForm = document.getElementById('admin-login-form');
+const loginError = document.getElementById('admin-login-error');
+const passwordInput = document.getElementById('admin-password');
+const disabledSection = document.getElementById('admin-disabled');
+const contentSection = document.getElementById('admin-content');
+const logoutBtn = document.getElementById('btn-admin-logout');
 
 const STATUS_LABELS = {
   stopped: 'Parado',
@@ -13,6 +20,15 @@ const STATUS_LABELS = {
   auth_failure: 'Falha auth',
   error: 'Erro',
 };
+
+let pollHandle = null;
+
+function show(state) {
+  loginSection.classList.toggle('hidden', state !== 'login');
+  disabledSection.classList.toggle('hidden', state !== 'disabled');
+  contentSection.classList.toggle('hidden', state !== 'authed');
+  logoutBtn.classList.toggle('hidden', state !== 'authed');
+}
 
 function formatPhone(chatId) {
   if (!chatId) return '-';
@@ -29,7 +45,12 @@ function formatDate(iso) {
 async function loadUsers() {
   try {
     const res = await fetch('/api/admin/users', { credentials: 'include' });
-    if (!res.ok) throw new Error('Falha ao carregar usuarios');
+    if (res.status === 401) {
+      stopPolling();
+      show('login');
+      return;
+    }
+    if (!res.ok) throw new Error('Falha ao carregar usuarios (HTTP ' + res.status + ')');
     const { users } = await res.json();
 
     if (!users || users.length === 0) {
@@ -73,8 +94,6 @@ async function loadUsers() {
   }
 }
 
-refreshUsersBtn?.addEventListener('click', loadUsers);
-
 async function loadConfig() {
   try {
     const res = await fetch('/api/config', { credentials: 'include' });
@@ -91,6 +110,78 @@ async function loadConfig() {
   } catch {}
 }
 
+function startPolling() {
+  if (pollHandle) return;
+  pollHandle = setInterval(loadUsers, 15000);
+}
+
+function stopPolling() {
+  if (!pollHandle) return;
+  clearInterval(pollHandle);
+  pollHandle = null;
+}
+
+async function enterAuthedMode() {
+  show('authed');
+  await loadConfig();
+  await loadUsers();
+  startPolling();
+}
+
+async function checkSession() {
+  try {
+    const res = await fetch('/api/admin/check', { credentials: 'include' });
+    const data = await res.json();
+    if (!data.enabled) {
+      show('disabled');
+      return;
+    }
+    if (data.authed) {
+      await enterAuthedMode();
+    } else {
+      show('login');
+      passwordInput?.focus();
+    }
+  } catch {
+    show('login');
+  }
+}
+
+loginForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  loginError.classList.add('hidden');
+  const password = passwordInput.value;
+  if (!password) return;
+  try {
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+      credentials: 'include',
+    });
+    if (res.status === 401) {
+      loginError.textContent = 'Senha incorreta.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    passwordInput.value = '';
+    await enterAuthedMode();
+  } catch (err) {
+    loginError.textContent = 'Erro: ' + err.message;
+    loginError.classList.remove('hidden');
+  }
+});
+
+logoutBtn?.addEventListener('click', async () => {
+  await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
+  stopPolling();
+  show('login');
+  passwordInput?.focus();
+});
+
+refreshUsersBtn?.addEventListener('click', loadUsers);
+
 form.addEventListener('submit', async event => {
   event.preventDefault();
   const data = {};
@@ -105,6 +196,11 @@ form.addEventListener('submit', async event => {
       body: JSON.stringify(data),
       credentials: 'include',
     });
+    if (res.status === 401) {
+      stopPolling();
+      show('login');
+      return;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     feedback.classList.remove('hidden');
     setTimeout(() => feedback.classList.add('hidden'), 4000);
@@ -113,6 +209,4 @@ form.addEventListener('submit', async event => {
   }
 });
 
-loadConfig();
-loadUsers();
-setInterval(loadUsers, 15000);
+checkSession();

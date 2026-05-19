@@ -21,8 +21,38 @@
           <p class="eyebrow">Dono da solucao</p>
           <h2>Monitoramento</h2>
         </div>
-        <a class="btn-secondary" href="/">Ver onboarding</a>
+        <div class="topbar-actions">
+          <a class="btn-secondary" href="/">Ver onboarding</a>
+          <button type="button" id="btn-admin-logout" class="btn-ghost hidden">Sair</button>
+        </div>
       </header>
+
+      <section id="admin-login" class="panel hidden">
+        <div class="panel-heading">
+          <p class="eyebrow">Acesso restrito</p>
+          <h3>Entrar no painel admin</h3>
+        </div>
+        <form id="admin-login-form">
+          <label class="field">
+            <span>Senha</span>
+            <input type="password" id="admin-password" autocomplete="current-password" required />
+          </label>
+          <p id="admin-login-error" class="hidden feedback-err">Senha incorreta.</p>
+          <div class="form-footer">
+            <button type="submit" class="btn-primary">Entrar</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="admin-disabled" class="panel hidden">
+        <div class="panel-heading">
+          <p class="eyebrow">Configuracao pendente</p>
+          <h3>Admin desabilitado</h3>
+        </div>
+        <p>Defina <code>ADMIN_PASSWORD</code> no <code>bot.env</code> do servidor e reinicie o container para ativar o painel.</p>
+      </section>
+
+      <div id="admin-content" class="hidden">
 
       <section class="panel">
         <div class="panel-heading">
@@ -95,6 +125,8 @@
           <p id="admin-feedback" class="hidden feedback-ok">Plataforma salva.</p>
         </form>
       </details>
+
+      </div><!-- /#admin-content -->
     </section>
   </main>
 
