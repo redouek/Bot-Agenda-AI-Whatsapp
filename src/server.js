@@ -67,7 +67,7 @@ function timingSafeStringEqual(a, b) {
 }
 
 const ADMIN_COOKIE = 'adminSession';
-const ADMIN_SESSION_MS = 12 * 60 * 60 * 1000;
+const ADMIN_SESSION_MS = 120 * 24 * 60 * 60 * 1000;
 
 function getAdminSecret() {
   const pw = process.env.ADMIN_PASSWORD;
