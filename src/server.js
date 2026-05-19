@@ -377,6 +377,51 @@ async function handleRequest(req, res, manager) {
     }
   }
 
+  if (pathname === '/api/user/pause' && req.method === 'POST') {
+    const user = await manager.getOrCreateCurrentUser(userId);
+    try {
+      await manager.pauseWhatsAppInstance(user.id);
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  if (pathname === '/api/user/resume' && req.method === 'POST') {
+    const user = await manager.getOrCreateCurrentUser(userId);
+    try {
+      manager.startWhatsAppInstance(user.id).catch(err => console.error('[server] Erro ao retomar bot:', err));
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  if (pathname === '/api/user/switch-number' && req.method === 'POST') {
+    const user = await manager.getOrCreateCurrentUser(userId);
+    try {
+      await manager.logoutWhatsAppInstance(user.id);
+      // Limpa o telefone do usuario para que ele complete o step 2 de novo
+      await manager.updateUserSettings(user.id, { assistantChatId: null });
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  if (pathname === '/api/user/delete' && req.method === 'POST') {
+    const user = await manager.getOrCreateCurrentUser(userId);
+    try {
+      await manager.logoutWhatsAppInstance(user.id);
+      await manager.deleteUser(user.id);
+      // Limpa cookie do usuario
+      res.setHeader('Set-Cookie', `userId=; Path=/; SameSite=Lax; Max-Age=0`);
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   if (pathname === '/oauth/start') {
     try {
       const user = await manager.getOrCreateCurrentUser(userId);

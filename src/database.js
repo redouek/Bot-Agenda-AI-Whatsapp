@@ -141,6 +141,13 @@ export async function getUser(userId = DEFAULT_USER_ID) {
   return db.get('SELECT * FROM users WHERE id = ?', normalizeUserId(userId));
 }
 
+export async function deleteUser(userId) {
+  const db = await getDb();
+  const id = normalizeUserId(userId);
+  // FK ON DELETE CASCADE remove google_tokens e whatsapp_sessions automaticamente
+  await db.run('DELETE FROM users WHERE id = ?', id);
+}
+
 export async function listUsers() {
   const db = await getDb();
   return db.all('SELECT * FROM users ORDER BY created_at ASC');

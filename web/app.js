@@ -286,12 +286,148 @@ function updateStatusLabel(botStatus) {
     authenticated: 'WhatsApp autenticado',
     awaiting_qr: 'Aguardando QR Code',
     ready: 'Rodando',
+    paused: 'Pausado',
     disconnected: 'Desconectado',
     auth_failure: 'Falha de autenticacao',
     error: 'Erro',
   };
   $('status-label').textContent = labels[botStatus] || botStatus;
 }
+
+function updateReadyView(status) {
+  const isPaused = status?.botStatus === 'paused';
+  const eyebrow = $('ready-eyebrow');
+  const title = $('ready-title');
+  const whatsappLabel = $('whatsapp-label');
+  const whatsappIcon = $('whatsapp-icon');
+  const whatsappCard = $('status-whatsapp');
+  const btnPause = $('btn-pause');
+
+  if (isPaused) {
+    if (eyebrow) eyebrow.textContent = 'Em pausa';
+    if (title) title.textContent = 'Bot pausado';
+    if (whatsappLabel) whatsappLabel.textContent = 'WhatsApp pausado';
+    if (whatsappIcon) whatsappIcon.textContent = '||';
+    whatsappCard?.classList.remove('ok');
+    if (btnPause) {
+      btnPause.querySelector('.action-title').textContent = 'Retomar bot';
+      btnPause.querySelector('.action-sub').textContent = 'Voltar a responder mensagens e enviar lembretes.';
+      btnPause.dataset.action = 'resume';
+    }
+  } else {
+    if (eyebrow) eyebrow.textContent = 'Tudo pronto';
+    if (title) title.textContent = 'Bot conectado';
+    if (whatsappLabel) whatsappLabel.textContent = 'WhatsApp conectado';
+    if (whatsappIcon) whatsappIcon.textContent = 'OK';
+    whatsappCard?.classList.add('ok');
+    if (btnPause) {
+      btnPause.querySelector('.action-title').textContent = 'Pausar bot';
+      btnPause.querySelector('.action-sub').textContent = 'Bot para de responder. Pode retomar a qualquer momento.';
+      btnPause.dataset.action = 'pause';
+    }
+  }
+}
+
+function openConfirm({ title, message, confirmLabel = 'Confirmar', danger = false, requireCheck = null, onConfirm }) {
+  const backdrop = $('confirm-modal');
+  const okBtn = $('btn-confirm-ok');
+  const checksWrap = $('confirm-checks');
+  const checkbox = $('confirm-check-input');
+  const checkLabel = $('confirm-check-label');
+
+  $('confirm-title').textContent = title;
+  $('confirm-message').textContent = message;
+  okBtn.textContent = confirmLabel;
+  okBtn.classList.toggle('btn-danger', danger);
+  okBtn.classList.toggle('btn-primary', !danger);
+
+  if (requireCheck) {
+    checksWrap.classList.remove('hidden');
+    checkLabel.textContent = requireCheck;
+    checkbox.checked = false;
+    okBtn.disabled = true;
+    checkbox.onchange = () => { okBtn.disabled = !checkbox.checked; };
+  } else {
+    checksWrap.classList.add('hidden');
+    okBtn.disabled = false;
+  }
+
+  const close = () => {
+    backdrop.classList.add('hidden');
+    okBtn.onclick = null;
+    $('btn-confirm-cancel').onclick = null;
+    checkbox.onchange = null;
+  };
+
+  okBtn.onclick = async () => {
+    okBtn.disabled = true;
+    try { await onConfirm(); } finally { close(); }
+  };
+  $('btn-confirm-cancel').onclick = close;
+
+  backdrop.classList.remove('hidden');
+}
+
+async function postJson(url) {
+  const res = await fetch(apiPath(url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  if (!res.ok) {
+    let msg = 'HTTP ' + res.status;
+    try { msg = (await res.json()).error || msg; } catch {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+$('btn-pause')?.addEventListener('click', async () => {
+  const action = $('btn-pause').dataset.action || 'pause';
+  try {
+    await postJson(action === 'pause' ? '/api/user/pause' : '/api/user/resume');
+    await pollStatus();
+  } catch (err) {
+    alert('Nao foi possivel ' + (action === 'pause' ? 'pausar' : 'retomar') + ': ' + err.message);
+  }
+});
+
+$('btn-switch-number')?.addEventListener('click', () => {
+  openConfirm({
+    title: 'Trocar numero',
+    message: 'Vamos desvincular este WhatsApp e te levar de volta para informar o novo numero. Seu Google Calendar continua conectado.',
+    confirmLabel: 'Trocar numero',
+    onConfirm: async () => {
+      try {
+        await postJson('/api/user/switch-number');
+        // Volta para step 2 (informar novo numero)
+        showSetup();
+        showStep(2);
+      } catch (err) {
+        alert('Nao foi possivel trocar o numero: ' + err.message);
+      }
+    },
+  });
+});
+
+$('btn-review-config')?.addEventListener('click', () => {
+  showSetup();
+});
+
+$('btn-delete')?.addEventListener('click', () => {
+  openConfirm({
+    title: 'Excluir conta',
+    message: 'Isso vai desvincular seu WhatsApp, apagar a sessao, remover seus tokens Google e apagar suas configuracoes do banco. Nao da pra desfazer.',
+    confirmLabel: 'Excluir tudo',
+    danger: true,
+    requireCheck: 'Entendo que esta acao e irreversivel.',
+    onConfirm: async () => {
+      try {
+        await postJson('/api/user/delete');
+        // Redireciona para a home (onboarding zerado)
+        location.href = '/';
+      } catch (err) {
+        alert('Nao foi possivel excluir: ' + err.message);
+      }
+    },
+  });
+});
 
 function updateCalendarStatus(connected) {
   const icon = $('calendar-icon');
@@ -523,14 +659,15 @@ async function pollStatus() {
       return;
     }
 
-    if (status.botStatus === 'ready') {
-      if (!finalizingSetup) {
-        show('section-setup');
+    if (status.botStatus === 'ready' || status.botStatus === 'paused') {
+      // Usuario configurado — tela principal vira o painel de gestao
+      if (status.hasPhone || finalizingSetup) {
+        show('section-ready');
+        updateReadyView(status);
+        updateCalendarStatus(status.calendarConnected);
         return;
       }
-
-      show('section-ready');
-      updateCalendarStatus(status.calendarConnected);
+      show('section-setup');
       return;
     }
 

@@ -4,12 +4,14 @@ import { loadConfig, isPlatformConfigured } from './config.js';
 import { startServer } from './server.js';
 import { processIncomingMessage, processReaction, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb } from './bot.js';
 import {
+  deleteUser,
   ensureUser,
   getDefaultUserId,
   getWhatsAppSession,
   getWhatsAppSessionPath,
   initDatabase,
   listUsers,
+  updateUserSettings,
   updateWhatsAppSession,
 } from './database.js';
 
@@ -167,7 +169,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
   return runtime;
 }
 
-export async function stopWhatsAppInstance(userId = getDefaultUserId()) {
+export async function stopWhatsAppInstance(userId = getDefaultUserId(), finalStatus = 'stopped') {
   const runtime = whatsappInstances.get(userId);
   if (runtime?.client) {
     try {
@@ -180,6 +182,36 @@ export async function stopWhatsAppInstance(userId = getDefaultUserId()) {
   stopReminderLoop(userId);
   stopSelfChatPolling(userId);
   whatsappInstances.delete(userId);
+  await updateWhatsAppSession(userId, { status: finalStatus, latestQr: null });
+}
+
+export async function pauseWhatsAppInstance(userId = getDefaultUserId()) {
+  await stopWhatsAppInstance(userId, 'paused');
+}
+
+// Faz logout no WhatsApp (desvincula o dispositivo) e remove a pasta de sessao.
+// Necessario antes de trocar de numero ou excluir conta.
+export async function logoutWhatsAppInstance(userId = getDefaultUserId()) {
+  const runtime = whatsappInstances.get(userId);
+  if (runtime?.client) {
+    try {
+      await runtime.client.logout();
+    } catch (error) {
+      console.warn(`[index] Falha no logout ${userId}:`, error?.message || error);
+      try { await runtime.client.destroy(); } catch {}
+    }
+  }
+  stopReminderLoop(userId);
+  stopSelfChatPolling(userId);
+  whatsappInstances.delete(userId);
+
+  // Remove arquivos da sessao em disco
+  const sessionPath = getWhatsAppSessionPath(userId);
+  try {
+    await fs.promises.rm(sessionPath, { recursive: true, force: true });
+  } catch (err) {
+    console.warn(`[index] Falha ao apagar sessao ${sessionPath}:`, err?.message);
+  }
   await updateWhatsAppSession(userId, { status: 'stopped', latestQr: null });
 }
 
@@ -216,6 +248,12 @@ async function startConfiguredInstances() {
       continue;
     }
 
+    const session = await getWhatsAppSession(user.id);
+    if (session?.status === 'paused') {
+      console.log(`[index] Usuario ${user.id} esta com bot pausado. Pulando autostart.`);
+      continue;
+    }
+
     startWhatsAppInstance(user.id).catch(err => {
       console.error(`[index] Erro ao iniciar bot do usuario ${user.id}:`, err);
     });
@@ -232,6 +270,10 @@ async function main() {
     getWhatsAppStatus,
     startWhatsAppInstance,
     stopWhatsAppInstance,
+    pauseWhatsAppInstance,
+    logoutWhatsAppInstance,
+    deleteUser,
+    updateUserSettings,
   });
 
   await startConfiguredInstances();

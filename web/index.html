@@ -187,17 +187,50 @@
 
       <section id="section-ready" class="panel hidden">
         <div class="panel-heading">
-          <p class="eyebrow">Tudo pronto</p>
-          <h3>Bot conectado</h3>
+          <p class="eyebrow" id="ready-eyebrow">Tudo pronto</p>
+          <h3 id="ready-title">Bot conectado</h3>
         </div>
         <div class="status-grid">
-          <div class="status-item ok"><span class="status-icon">OK</span><span>WhatsApp conectado</span></div>
+          <div id="status-whatsapp" class="status-item ok"><span class="status-icon" id="whatsapp-icon">OK</span><span id="whatsapp-label">WhatsApp conectado</span></div>
           <div id="status-calendar" class="status-item"><span class="status-icon" id="calendar-icon">...</span><span id="calendar-label">Verificando Google Calendar...</span></div>
         </div>
-        <div class="actions">
-          <button class="btn-secondary" type="button" onclick="showSetup()">Editar</button>
+
+        <div class="account-actions">
+          <button class="btn-secondary action-card" type="button" id="btn-pause">
+            <span class="action-title">Pausar bot</span>
+            <span class="action-sub">Bot para de responder. Pode retomar a qualquer momento.</span>
+          </button>
+          <button class="btn-secondary action-card" type="button" id="btn-switch-number">
+            <span class="action-title">Trocar numero</span>
+            <span class="action-sub">Desvincula o WhatsApp atual e gera novo QR. Mantem o Google Calendar.</span>
+          </button>
+          <button class="btn-secondary action-card" type="button" id="btn-review-config">
+            <span class="action-title">Revisar configuracoes</span>
+            <span class="action-sub">Voltar para a tela de onboarding e ajustar Calendar, telefone, lembrete, etc.</span>
+          </button>
+          <button class="btn-danger action-card" type="button" id="btn-delete">
+            <span class="action-title">Excluir conta</span>
+            <span class="action-sub">Para o bot, desconecta do WhatsApp e apaga seus dados. Irreversivel.</span>
+          </button>
         </div>
       </section>
+
+      <div id="confirm-modal" class="modal-backdrop hidden">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          <h3 id="confirm-title">Confirmar acao</h3>
+          <p id="confirm-message">Tem certeza?</p>
+          <div id="confirm-checks" class="confirm-checks hidden">
+            <label class="confirm-check">
+              <input type="checkbox" id="confirm-check-input" />
+              <span id="confirm-check-label">Entendo que esta acao e irreversivel.</span>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn-ghost" id="btn-confirm-cancel">Cancelar</button>
+            <button type="button" class="btn-danger" id="btn-confirm-ok" disabled>Confirmar</button>
+          </div>
+        </div>
+      </div>
 
       <section id="section-disconnected" class="panel hidden">
         <div class="panel-heading">
