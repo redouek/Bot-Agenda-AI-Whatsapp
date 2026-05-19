@@ -298,46 +298,6 @@ async function handleRequest(req, res, manager) {
     return;
   }
 
-  if (pathname === '/auth/google/callback') {
-    const code = url.searchParams.get('code');
-    const state = url.searchParams.get('state');
-    const cookies = parseCookies(req.headers.cookie || '');
-    if (!code || !state || state !== cookies.oauthState) {
-      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<h2>Erro</h2><p>State invalido ou codigo ausente.</p><a href="/">Voltar</a>');
-      return;
-    }
-    try {
-      const { tokens, profile } = await exchangeCodeForLogin(code);
-      const email = String(profile.email || '').toLowerCase().trim();
-      const sub = profile.sub || profile.id || null;
-      if (!email) throw new Error('Conta Google nao retornou email.');
-
-      // Localiza usuario existente por sub > email; senao cria novo
-      let existing = (sub && await findUserByGoogleSub(sub)) || await findUserByEmail(email);
-      const userId = existing?.id || email;
-      const name = profile.name || profile.given_name || email.split('@')[0];
-
-      await ensureUser({ id: userId, name, email, googleSub: sub });
-      await saveGoogleTokens(userId, tokens);
-
-      const token = signUserToken(userId);
-      res.writeHead(302, {
-        Location: '/?connected=1',
-        'Set-Cookie': [
-          `oauthState=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
-          userCookie(token, Math.floor(USER_SESSION_MS / 1000)),
-        ],
-      });
-      res.end();
-    } catch (err) {
-      console.error('[server] Falha no callback Google:', err);
-      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(`<h2>Erro ao entrar com Google</h2><p>${err.message}</p><a href="/">Voltar</a>`);
-    }
-    return;
-  }
-
   if (pathname === '/auth/logout' && req.method === 'POST') {
     return json(res, { ok: true }, 200, { 'Set-Cookie': userCookie('', 0) });
   }
@@ -621,22 +581,60 @@ async function handleRequest(req, res, manager) {
     return;
   }
 
-  if (pathname === '/oauth/callback') {
+  // Unifica /oauth/callback (legacy, ja registrado no Google Cloud) e
+  // /auth/google/callback — o state-cookie distingue login de reconnect.
+  if (pathname === '/oauth/callback' || pathname === '/auth/google/callback') {
     const code = url.searchParams.get('code');
-    const callbackUserId = url.searchParams.get('state');
-    if (!code || !callbackUserId) {
+    const state = url.searchParams.get('state');
+    const cookies = parseCookies(req.headers.cookie || '');
+
+    if (!code || !state) {
       res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<h2>Erro</h2><p>Codigo de autorizacao ausente.</p><a href="/">Voltar</a>');
+      res.end('<h2>Erro</h2><p>Codigo ou state ausente.</p><a href="/">Voltar</a>');
       return;
     }
+
+    // Caso 1: state bate com cookie oauthState -> fluxo de LOGIN com Google
+    if (cookies.oauthState && state === cookies.oauthState) {
+      try {
+        const { tokens, profile } = await exchangeCodeForLogin(code);
+        const email = String(profile.email || '').toLowerCase().trim();
+        const sub = profile.sub || profile.id || null;
+        if (!email) throw new Error('Conta Google nao retornou email.');
+
+        let existing = (sub && await findUserByGoogleSub(sub)) || await findUserByEmail(email);
+        const userId = existing?.id || email;
+        const name = profile.name || profile.given_name || email.split('@')[0];
+
+        await ensureUser({ id: userId, name, email, googleSub: sub });
+        await saveGoogleTokens(userId, tokens);
+
+        const token = signUserToken(userId);
+        res.writeHead(302, {
+          Location: '/?connected=1',
+          'Set-Cookie': [
+            `oauthState=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+            userCookie(token, Math.floor(USER_SESSION_MS / 1000)),
+          ],
+        });
+        res.end();
+      } catch (err) {
+        console.error('[server] Falha no login Google:', err);
+        res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`<h2>Erro ao entrar com Google</h2><p>${err.message}</p><a href="/">Voltar</a>`);
+      }
+      return;
+    }
+
+    // Caso 2: state e um userId existente -> reconnect Calendar do usuario logado
     try {
-      const existing = await getUser(callbackUserId);
+      const existing = await getUser(state);
       if (!existing) {
         res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end('<h2>Usuario nao encontrado</h2><a href="/">Voltar</a>');
         return;
       }
-      await exchangeCodeForTokens(code, callbackUserId);
+      await exchangeCodeForTokens(code, state);
       res.writeHead(302, { Location: '/?connected=1' });
       res.end();
     } catch (err) {
