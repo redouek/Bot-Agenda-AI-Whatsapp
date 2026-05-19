@@ -28,7 +28,7 @@ function formatDate(iso) {
 
 async function loadUsers() {
   try {
-    const res = await fetch('/api/admin/users');
+    const res = await fetch('/api/admin/users', { credentials: 'include' });
     if (!res.ok) throw new Error('Falha ao carregar usuarios');
     const { users } = await res.json();
 
@@ -77,7 +77,7 @@ refreshUsersBtn?.addEventListener('click', loadUsers);
 
 async function loadConfig() {
   try {
-    const res = await fetch('/api/config');
+    const res = await fetch('/api/config', { credentials: 'include' });
     const config = await res.json();
     for (const [key, value] of Object.entries(config)) {
       const input = form.elements[key];
@@ -99,15 +99,17 @@ form.addEventListener('submit', async event => {
   }
 
   try {
-    await fetch('/api/config', {
+    const res = await fetch('/api/admin/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
+      credentials: 'include',
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     feedback.classList.remove('hidden');
     setTimeout(() => feedback.classList.add('hidden'), 4000);
-  } catch {
-    alert('Nao foi possivel salvar a plataforma.');
+  } catch (err) {
+    alert('Nao foi possivel salvar a plataforma: ' + err.message);
   }
 });
 

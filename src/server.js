@@ -60,6 +60,43 @@ function getRequestUserId(req, url) {
   return url.searchParams.get('userId') || cookies.userId || getDefaultUserId();
 }
 
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return mismatch === 0;
+}
+
+function checkAdminAuth(req, res) {
+  const expected = process.env.ADMIN_PASSWORD;
+  if (!expected) {
+    res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<h2>Admin desabilitado</h2><p>Defina ADMIN_PASSWORD no bot.env e reinicie o container para ativar o painel admin.</p>');
+    return false;
+  }
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Basic ')) {
+    res.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="Admin", charset="UTF-8"',
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+    res.end('Autenticacao necessaria');
+    return false;
+  }
+  let decoded = '';
+  try { decoded = Buffer.from(header.slice(6), 'base64').toString('utf8'); } catch {}
+  const password = decoded.includes(':') ? decoded.slice(decoded.indexOf(':') + 1) : decoded;
+  if (!timingSafeEqual(password, expected)) {
+    res.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="Admin", charset="UTF-8"',
+      'Content-Type': 'text/plain; charset=utf-8',
+    });
+    res.end('Senha incorreta');
+    return false;
+  }
+  return true;
+}
+
 function userCookie(userId) {
   return `userId=${encodeURIComponent(userId)}; Path=/; SameSite=Lax; Max-Age=31536000`;
 }
@@ -115,7 +152,12 @@ async function handleRequest(req, res, manager) {
     return serveFile(res, path.join(WEB_DIR, 'index.html'), 'text/html; charset=utf-8');
   }
   if (pathname === '/admin') {
+    if (!checkAdminAuth(req, res)) return;
     return serveFile(res, path.join(WEB_DIR, 'admin.html'), 'text/html; charset=utf-8');
+  }
+  if (pathname === '/web/admin.js') {
+    if (!checkAdminAuth(req, res)) return;
+    return serveFile(res, path.join(WEB_DIR, 'admin.js'), 'application/javascript');
   }
   if (pathname === '/tutorial') {
     return serveFile(res, path.join(WEB_DIR, 'tutorial.html'), 'text/html; charset=utf-8');
@@ -125,9 +167,6 @@ async function handleRequest(req, res, manager) {
   }
   if (pathname === '/web/app.js') {
     return serveFile(res, path.join(WEB_DIR, 'app.js'), 'application/javascript');
-  }
-  if (pathname === '/web/admin.js') {
-    return serveFile(res, path.join(WEB_DIR, 'admin.js'), 'application/javascript');
   }
 
   if (pathname === '/api/session' && req.method === 'GET') {
@@ -148,14 +187,22 @@ async function handleRequest(req, res, manager) {
   if (pathname === '/api/config' && req.method === 'POST') {
     const body = await readBody(req);
     const user = await manager.getOrCreateCurrentUser(userId);
-    const platformKeys = [
-      'GOOGLE_API_KEY',
-      'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET', 'OAUTH_REDIRECT_URI',
-      'FOOTBALL_DATA_KEY', 'REMINDER_MINUTES', 'DEFAULT_TIMEZONE', 'GEMINI_MODEL',
-    ];
+    // Chaves sensiveis de plataforma — so podem ser alteradas via /api/admin/config (com auth)
+    const sensitivePlatformKeys = new Set([
+      'GOOGLE_API_KEY', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
+      'OAUTH_REDIRECT_URI', 'GEMINI_MODEL',
+    ]);
+    // Chaves de plataforma que usuarios podem ajustar (lembrete, fuso)
+    const userPlatformKeys = ['REMINDER_MINUTES', 'DEFAULT_TIMEZONE', 'FOOTBALL_DATA_KEY'];
     const update = {};
-    for (const key of platformKeys) {
+    for (const key of userPlatformKeys) {
       if (body[key] !== undefined && body[key] !== '') update[key] = body[key];
+    }
+    // Silently drop sensitive keys se chegaram aqui
+    for (const key of Object.keys(body)) {
+      if (sensitivePlatformKeys.has(key)) {
+        console.warn(`[server] Tentativa de set chave sensivel ${key} via /api/config bloqueada`);
+      }
     }
     if (Object.keys(update).length > 0) setConfig(update);
 
@@ -177,7 +224,24 @@ async function handleRequest(req, res, manager) {
     return json(res, { ok: true, userId: user.id });
   }
 
+  if (pathname === '/api/admin/config' && req.method === 'POST') {
+    if (!checkAdminAuth(req, res)) return;
+    const body = await readBody(req);
+    const platformKeys = [
+      'GOOGLE_API_KEY', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
+      'OAUTH_REDIRECT_URI', 'GEMINI_MODEL',
+      'FOOTBALL_DATA_KEY', 'REMINDER_MINUTES', 'DEFAULT_TIMEZONE',
+    ];
+    const update = {};
+    for (const key of platformKeys) {
+      if (body[key] !== undefined && body[key] !== '') update[key] = body[key];
+    }
+    if (Object.keys(update).length > 0) setConfig(update);
+    return json(res, { ok: true });
+  }
+
   if (pathname === '/api/admin/users' && req.method === 'GET') {
+    if (!checkAdminAuth(req, res)) return;
     const users = await listUsers();
     const enriched = await Promise.all(users.map(async u => {
       const session = await getWhatsAppSession(u.id).catch(() => null);

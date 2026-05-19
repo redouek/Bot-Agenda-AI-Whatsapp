@@ -11,23 +11,23 @@
     <aside class="brand-panel">
       <div class="brand-mark">AI</div>
       <p class="eyebrow">Admin</p>
-      <h1>Ative a plataforma.</h1>
-      <p class="brand-copy">Esta etapa e feita uma vez por voce, antes de liberar o onboarding para usuarios.</p>
+      <h1>Painel do administrador.</h1>
+      <p class="brand-copy">Monitore os usuarios conectados e mantenha as credenciais da plataforma.</p>
     </aside>
 
     <section class="workspace">
       <header class="topbar">
         <div>
           <p class="eyebrow">Dono da solucao</p>
-          <h2>Configuracao da plataforma</h2>
+          <h2>Monitoramento</h2>
         </div>
         <a class="btn-secondary" href="/">Ver onboarding</a>
       </header>
 
       <section class="panel">
         <div class="panel-heading">
-          <p class="eyebrow">Monitoramento</p>
-          <h3>Usuarios</h3>
+          <p class="eyebrow">Status</p>
+          <h3>Usuarios cadastrados</h3>
         </div>
         <div id="users-status" class="users-status">
           <p class="loading">Carregando usuarios...</p>
@@ -37,7 +37,14 @@
         </div>
       </section>
 
-      <section class="panel">
+      <details class="panel admin-config-collapse">
+        <summary>
+          <div class="panel-heading">
+            <p class="eyebrow">Configuracao</p>
+            <h3>Credenciais da plataforma</h3>
+          </div>
+          <small class="admin-config-hint">Clique para expandir. So mexa aqui se precisar trocar Gemini, OAuth ou URL de redirecionamento.</small>
+        </summary>
         <form id="admin-form">
           <div class="panel-heading">
             <p class="eyebrow">Obrigatorio</p>
@@ -87,7 +94,7 @@
           </div>
           <p id="admin-feedback" class="hidden feedback-ok">Plataforma salva.</p>
         </form>
-      </section>
+      </details>
     </section>
   </main>
 

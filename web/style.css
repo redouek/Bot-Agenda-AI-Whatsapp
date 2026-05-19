@@ -449,6 +449,21 @@ input:focus, select:focus {
 .badge.ok { background: var(--mint); color: var(--green-dark); }
 .badge.warn { background: #fff4d9; color: var(--amber); }
 
+.admin-config-collapse > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0;
+}
+.admin-config-collapse > summary::-webkit-details-marker { display: none; }
+.admin-config-collapse > summary:hover { opacity: .85; }
+.admin-config-collapse[open] > summary { margin-bottom: 12px; }
+.admin-config-hint {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: -6px;
+}
+
 .helper { margin-top: 4px; margin-bottom: 18px; color: var(--muted); }
 .helper summary { color: var(--ink); cursor: pointer; font-weight: 760; }
 .helper ol { padding-left: 20px; margin-top: 12px; line-height: 1.65; }
