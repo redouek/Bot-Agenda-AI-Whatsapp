@@ -19,9 +19,17 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '../web');
 
+const ASSET_VERSION = String(Date.now());
+
 function serveFile(res, filePath, contentType) {
   try {
-    const content = fs.readFileSync(filePath);
+    let content = fs.readFileSync(filePath);
+    // Cache-busting nos HTMLs: anexa ?v=ASSET_VERSION a /web/style.css, /web/app.js, /web/admin.js
+    if (contentType.startsWith('text/html')) {
+      content = Buffer.from(
+        content.toString('utf8').replace(/(\/web\/(?:style\.css|app\.js|admin\.js))(?:\?[^"']*)?/g, `$1?v=${ASSET_VERSION}`)
+      );
+    }
     res.writeHead(200, {
       'Content-Type': contentType,
       'Cache-Control': 'no-store, no-cache, must-revalidate',
