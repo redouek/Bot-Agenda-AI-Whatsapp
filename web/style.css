@@ -615,6 +615,32 @@ input:focus, select:focus {
 .badge.ok { background: var(--mint); color: var(--green-dark); }
 .badge.warn { background: #fff4d9; color: var(--amber); }
 
+.users-table .row-actions { white-space: nowrap; }
+.row-action {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.row-action:hover:not(:disabled) {
+  border-color: var(--green);
+  background: var(--mint);
+}
+.row-action.danger {
+  color: #b32c30;
+  border-color: rgba(192, 56, 59, .35);
+}
+.row-action.danger:hover:not(:disabled) {
+  background: #fff5f5;
+  border-color: #c0383b;
+}
+.row-action:disabled { opacity: .55; cursor: not-allowed; }
+
 .admin-config-collapse > summary {
   list-style: none;
   cursor: pointer;

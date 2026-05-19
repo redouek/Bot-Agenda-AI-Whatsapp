@@ -432,6 +432,43 @@ async function handleRequest(req, res, manager) {
     return json(res, { ok: true });
   }
 
+  if (pathname === '/api/admin/users/pause' && req.method === 'POST') {
+    if (!requireAdminApi(req, res)) return;
+    const body = await readBody(req);
+    if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
+    try {
+      await manager.pauseWhatsAppInstance(body.userId);
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  if (pathname === '/api/admin/users/resume' && req.method === 'POST') {
+    if (!requireAdminApi(req, res)) return;
+    const body = await readBody(req);
+    if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
+    try {
+      manager.startWhatsAppInstance(body.userId).catch(err => console.error('[server] Erro ao retomar bot:', err));
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  if (pathname === '/api/admin/users/delete' && req.method === 'POST') {
+    if (!requireAdminApi(req, res)) return;
+    const body = await readBody(req);
+    if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
+    try {
+      await manager.logoutWhatsAppInstance(body.userId);
+      await manager.deleteUser(body.userId);
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   if (pathname === '/api/admin/users' && req.method === 'GET') {
     if (!requireAdminApi(req, res)) return;
     const users = await listUsers();

@@ -58,18 +58,25 @@ async function loadUsers() {
       return;
     }
 
+    const escape = (s) => String(s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
     const rows = users.map(u => {
       const statusLabel = STATUS_LABELS[u.botStatus] || u.botStatus;
       const lidBadge = u.selfChatLid ? '<span class="badge ok">LID OK</span>' : '<span class="badge warn">LID pendente</span>';
       const calBadge = u.calendarConnected ? '<span class="badge ok">Calendar OK</span>' : '<span class="badge warn">Sem Calendar</span>';
+      const isPaused = u.botStatus === 'paused';
+      const pauseBtn = isPaused
+        ? `<button type="button" class="row-action" data-action="resume" data-uid="${escape(u.id)}">Retomar</button>`
+        : `<button type="button" class="row-action" data-action="pause" data-uid="${escape(u.id)}">Pausar</button>`;
+      const deleteBtn = `<button type="button" class="row-action danger" data-action="delete" data-uid="${escape(u.id)}" data-name="${escape(u.name || u.id)}">Excluir</button>`;
       return `
         <tr>
-          <td><strong>${u.name || u.id}</strong><br><small>${u.id}</small></td>
+          <td><strong>${escape(u.name || u.id)}</strong><br><small>${escape(u.id)}</small></td>
           <td>${formatPhone(u.phone)}</td>
           <td>${calBadge}</td>
           <td>${lidBadge}</td>
           <td>${statusLabel}</td>
           <td><small>${formatDate(u.lastReadyAt)}</small></td>
+          <td class="row-actions">${pauseBtn} ${deleteBtn}</td>
         </tr>
       `;
     }).join('');
@@ -84,13 +91,54 @@ async function loadUsers() {
             <th>LID</th>
             <th>Bot</th>
             <th>Ultimo ready</th>
+            <th>Acoes</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
     `;
+
+    // Wire dos botoes de acao
+    usersStatus.querySelectorAll('.row-action').forEach(btn => {
+      btn.addEventListener('click', () => handleUserAction(btn));
+    });
   } catch (err) {
     usersStatus.innerHTML = `<p class="loading">Erro: ${err.message}</p>`;
+  }
+}
+
+async function handleUserAction(btn) {
+  const action = btn.dataset.action;
+  const userId = btn.dataset.uid;
+  const name = btn.dataset.name || userId;
+  if (!action || !userId) return;
+
+  if (action === 'delete') {
+    const ok = confirm(`Excluir o usuario "${name}"?\n\nIsso vai:\n- Desvincular o WhatsApp do dispositivo\n- Apagar a sessao em disco\n- Apagar tokens Google e configuracoes\n\nAcao irreversivel.`);
+    if (!ok) return;
+  }
+
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = '...';
+  try {
+    const res = await fetch(`/api/admin/users/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+      credentials: 'include',
+    });
+    if (res.status === 401) { stopPolling(); show('login'); return; }
+    if (!res.ok) {
+      let msg = 'HTTP ' + res.status;
+      try { msg = (await res.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+    await loadUsers();
+  } catch (err) {
+    alert('Erro: ' + err.message);
+    btn.textContent = original;
+    btn.disabled = false;
   }
 }
 
