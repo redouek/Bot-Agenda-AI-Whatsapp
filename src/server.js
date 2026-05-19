@@ -7,6 +7,7 @@ import qrcode from 'qrcode';
 import { getConfig, setConfig, isPlatformConfigured } from './config.js';
 import { getAuthUrl, getLoginAuthUrl, exchangeCodeForLogin, exchangeCodeForTokens, listCalendars } from './calendar.js';
 import {
+  countAdmins,
   ensureUser,
   findUserByEmail,
   findUserByGoogleSub,
@@ -16,6 +17,7 @@ import {
   isGoogleConnected,
   listUsers,
   saveGoogleTokens,
+  setUserAdmin,
   updateUserSettings,
   getWhatsAppSession,
 } from './database.js';
@@ -179,23 +181,55 @@ function isAdminAuthed(req) {
   return verifyAdminToken(cookies[ADMIN_COOKIE]);
 }
 
+// Lista de emails marcados como admin via env var (uppercase para case-insensitive)
+function getAdminEmailsFromEnv() {
+  return String(process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+// Verifica se um usuario logado tem is_admin = 1 OU email batendo com ADMIN_EMAILS
+async function isUserAdmin(userId) {
+  if (!userId) return false;
+  const user = await getUser(userId);
+  if (!user) return false;
+  if (user.is_admin) return true;
+  const adminEmails = getAdminEmailsFromEnv();
+  if (user.email && adminEmails.includes(user.email.toLowerCase())) {
+    // Auto-promove (so atualiza o banco)
+    await setUserAdmin(user.id, true);
+    return true;
+  }
+  return false;
+}
+
+// True se a request tem ALGUMA forma de autenticacao admin
+async function hasAdminAccess(req) {
+  if (isAdminAuthed(req)) return true;
+  const uid = getRequestUserId(req);
+  return uid ? await isUserAdmin(uid) : false;
+}
+
 function adminCookie(value, maxAgeSec) {
   const parts = [`${ADMIN_COOKIE}=${value || ''}`, 'Path=/', 'HttpOnly', 'SameSite=Lax'];
   if (typeof maxAgeSec === 'number') parts.push(`Max-Age=${maxAgeSec}`);
   return parts.join('; ');
 }
 
-// Gate para endpoints de API admin — responde 401 JSON ou 503 se admin desabilitado.
-function requireAdminApi(req, res) {
+// Gate para endpoints de API admin — aceita ADMIN_PASSWORD session OU usuario com is_admin.
+async function requireAdminApi(req, res) {
+  if (await hasAdminAccess(req)) return true;
+  // Se admin password nao configurada E nao tem nenhum admin user, retorna 503
   if (!process.env.ADMIN_PASSWORD) {
-    json(res, { error: 'admin desabilitado' }, 503);
-    return false;
+    const total = await countAdmins().catch(() => 0);
+    if (total === 0 && !getAdminEmailsFromEnv().length) {
+      json(res, { error: 'admin desabilitado' }, 503);
+      return false;
+    }
   }
-  if (!isAdminAuthed(req)) {
-    json(res, { error: 'nao autenticado' }, 401);
-    return false;
-  }
-  return true;
+  json(res, { error: 'nao autenticado' }, 401);
+  return false;
 }
 
 function maskConfig(config) {
@@ -277,8 +311,12 @@ async function handleRequest(req, res, manager) {
     return json(res, { ok: true }, 200, { 'Set-Cookie': adminCookie('', 0) });
   }
   if (pathname === '/api/admin/check' && req.method === 'GET') {
-    if (!process.env.ADMIN_PASSWORD) return json(res, { authed: false, enabled: false }, 200);
-    return json(res, { authed: isAdminAuthed(req), enabled: true }, 200);
+    const passwordEnabled = !!process.env.ADMIN_PASSWORD;
+    const authed = await hasAdminAccess(req);
+    // Enabled se tem senha OU se ha pelo menos um admin user OU ADMIN_EMAILS configurado
+    const totalAdmins = await countAdmins().catch(() => 0);
+    const enabled = passwordEnabled || totalAdmins > 0 || getAdminEmailsFromEnv().length > 0;
+    return json(res, { authed, enabled, passwordEnabled }, 200);
   }
 
   // ---------- Auth Google (login) ----------
@@ -377,7 +415,7 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/admin/config' && req.method === 'POST') {
-    if (!requireAdminApi(req, res)) return;
+    if (!(await requireAdminApi(req, res))) return;
     const body = await readBody(req);
     const platformKeys = [
       'GOOGLE_API_KEY', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
@@ -393,7 +431,7 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/admin/users/pause' && req.method === 'POST') {
-    if (!requireAdminApi(req, res)) return;
+    if (!(await requireAdminApi(req, res))) return;
     const body = await readBody(req);
     if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
     try {
@@ -405,7 +443,7 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/admin/users/resume' && req.method === 'POST') {
-    if (!requireAdminApi(req, res)) return;
+    if (!(await requireAdminApi(req, res))) return;
     const body = await readBody(req);
     if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
     try {
@@ -417,10 +455,18 @@ async function handleRequest(req, res, manager) {
   }
 
   if (pathname === '/api/admin/users/delete' && req.method === 'POST') {
-    if (!requireAdminApi(req, res)) return;
+    if (!(await requireAdminApi(req, res))) return;
     const body = await readBody(req);
     if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
     try {
+      // Bloqueia auto-delete: se o usuario que esta deletando e o ultimo admin
+      const target = await getUser(body.userId);
+      if (target?.is_admin) {
+        const total = await countAdmins();
+        if (total <= 1) {
+          return json(res, { error: 'nao pode deletar o ultimo administrador' }, 400);
+        }
+      }
       await manager.logoutWhatsAppInstance(body.userId);
       await manager.deleteUser(body.userId);
       return json(res, { ok: true });
@@ -429,8 +475,30 @@ async function handleRequest(req, res, manager) {
     }
   }
 
+  if (pathname === '/api/admin/users/set-admin' && req.method === 'POST') {
+    if (!(await requireAdminApi(req, res))) return;
+    const body = await readBody(req);
+    if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
+    try {
+      const target = await getUser(body.userId);
+      if (!target) return json(res, { error: 'usuario nao existe' }, 404);
+      const willPromote = !!body.isAdmin;
+      // Se for despromover, garante que nao fica sem admin nenhum
+      if (target.is_admin && !willPromote) {
+        const total = await countAdmins();
+        if (total <= 1) {
+          return json(res, { error: 'nao pode remover o ultimo administrador' }, 400);
+        }
+      }
+      await setUserAdmin(body.userId, willPromote);
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   if (pathname === '/api/admin/users' && req.method === 'GET') {
-    if (!requireAdminApi(req, res)) return;
+    if (!(await requireAdminApi(req, res))) return;
     const users = await listUsers();
     const enriched = await Promise.all(users.map(async u => {
       const session = await getWhatsAppSession(u.id).catch(() => null);
@@ -438,6 +506,8 @@ async function handleRequest(req, res, manager) {
       return {
         id: u.id,
         name: u.name,
+        email: u.email || null,
+        isAdmin: !!u.is_admin,
         phone: u.assistant_chat_id || null,
         selfChatLid: u.self_chat_lid || null,
         calendarId: u.calendar_id || null,
@@ -608,6 +678,15 @@ async function handleRequest(req, res, manager) {
 
         await ensureUser({ id: userId, name, email, googleSub: sub });
         await saveGoogleTokens(userId, tokens);
+
+        // Bootstrap: se o email esta em ADMIN_EMAILS, promove a admin automaticamente.
+        // Tambem promove o PRIMEIRO usuario do sistema (sem precisar de senha admin).
+        const adminEmails = getAdminEmailsFromEnv();
+        const totalAdminsBefore = await countAdmins().catch(() => 0);
+        if ((adminEmails.length && adminEmails.includes(email)) || totalAdminsBefore === 0) {
+          await setUserAdmin(userId, true);
+          console.log(`[server] Usuario ${userId} promovido a admin no login.`);
+        }
 
         const token = signUserToken(userId);
         res.writeHead(302, {

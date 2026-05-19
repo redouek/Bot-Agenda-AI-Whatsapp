@@ -67,16 +67,20 @@ async function loadUsers() {
       const pauseBtn = isPaused
         ? `<button type="button" class="row-action" data-action="resume" data-uid="${escape(u.id)}">Retomar</button>`
         : `<button type="button" class="row-action" data-action="pause" data-uid="${escape(u.id)}">Pausar</button>`;
+      const adminBtn = u.isAdmin
+        ? `<button type="button" class="row-action" data-action="unset-admin" data-uid="${escape(u.id)}">Remover admin</button>`
+        : `<button type="button" class="row-action" data-action="set-admin" data-uid="${escape(u.id)}">Promover admin</button>`;
       const deleteBtn = `<button type="button" class="row-action danger" data-action="delete" data-uid="${escape(u.id)}" data-name="${escape(u.name || u.id)}">Excluir</button>`;
+      const adminBadge = u.isAdmin ? ' <span class="badge admin">Admin</span>' : '';
       return `
         <tr>
-          <td><strong>${escape(u.name || u.id)}</strong><br><small>${escape(u.id)}</small></td>
+          <td><strong>${escape(u.name || u.id)}</strong>${adminBadge}<br><small>${escape(u.email || u.id)}</small></td>
           <td>${formatPhone(u.phone)}</td>
           <td>${calBadge}</td>
           <td>${lidBadge}</td>
           <td>${statusLabel}</td>
           <td><small>${formatDate(u.lastReadyAt)}</small></td>
-          <td class="row-actions">${pauseBtn} ${deleteBtn}</td>
+          <td class="row-actions">${pauseBtn} ${adminBtn} ${deleteBtn}</td>
         </tr>
       `;
     }).join('');
@@ -118,14 +122,24 @@ async function handleUserAction(btn) {
     if (!ok) return;
   }
 
+  // Mapeia acoes para endpoint + body
+  let endpoint = '';
+  let body = { userId };
+  if (action === 'set-admin' || action === 'unset-admin') {
+    endpoint = '/api/admin/users/set-admin';
+    body = { userId, isAdmin: action === 'set-admin' };
+  } else {
+    endpoint = `/api/admin/users/${action}`;
+  }
+
   btn.disabled = true;
   const original = btn.textContent;
   btn.textContent = '...';
   try {
-    const res = await fetch(`/api/admin/users/${action}`, {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify(body),
       credentials: 'include',
     });
     if (res.status === 401) { stopPolling(); show('login'); return; }

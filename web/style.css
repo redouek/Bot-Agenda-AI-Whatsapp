@@ -614,6 +614,7 @@ input:focus, select:focus {
 }
 .badge.ok { background: var(--mint); color: var(--green-dark); }
 .badge.warn { background: #fff4d9; color: var(--amber); }
+.badge.admin { background: #eef0fc; color: #3a4ab8; }
 
 .users-table .row-actions { white-space: nowrap; }
 .row-action {

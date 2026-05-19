@@ -98,6 +98,12 @@ export async function initDatabase() {
   } catch {
     // Coluna ja existe
   }
+  // Migration: flag de administrador
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    // Coluna ja existe
+  }
 
   await ensureUser({
     id: DEFAULT_USER_ID,
@@ -157,6 +163,17 @@ export async function findUserByGoogleSub(sub) {
   if (!sub) return null;
   const db = await getDb();
   return db.get('SELECT * FROM users WHERE google_sub = ?', sub);
+}
+
+export async function setUserAdmin(userId, isAdmin) {
+  const db = await getDb();
+  await db.run('UPDATE users SET is_admin = ?, updated_at = ? WHERE id = ?', isAdmin ? 1 : 0, nowIso(), normalizeUserId(userId));
+}
+
+export async function countAdmins() {
+  const db = await getDb();
+  const row = await db.get('SELECT COUNT(*) AS n FROM users WHERE is_admin = 1');
+  return row?.n || 0;
 }
 
 export async function getUser(userId = DEFAULT_USER_ID) {
