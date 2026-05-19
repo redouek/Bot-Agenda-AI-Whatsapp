@@ -297,6 +297,75 @@ function updateStatusLabel(botStatus) {
   $('status-label').textContent = labels[botStatus] || botStatus;
 }
 
+const STEP4_STATE_COPY = {
+  initializing: {
+    title: 'Iniciando o WhatsApp...',
+    detail: 'Estamos abrindo o WhatsApp Web no servidor. Isso leva uns 10-30 segundos.',
+  },
+  awaiting_qr: {
+    title: 'QR Code pronto',
+    detail: 'Abra o WhatsApp do celular, va em Aparelhos conectados e escaneie o QR abaixo.',
+  },
+  authenticated: {
+    title: 'Quase la, conectando...',
+    detail: 'WhatsApp autenticado. Finalizando a configuracao.',
+  },
+  ready: {
+    title: 'Bot conectado!',
+    detail: 'Pronto. Voce ja pode usar o bot pelo seu chat consigo mesmo no WhatsApp.',
+  },
+};
+
+const STEP4_ERROR_COPY = {
+  error: 'Falha inesperada ao iniciar o WhatsApp. Confira os logs no servidor.',
+  auth_failure: 'A autenticacao do WhatsApp falhou. Tente escanear o QR de novo.',
+  disconnected: 'O WhatsApp desconectou. Pode ter sido encerrado no celular ou houve erro de rede.',
+};
+
+function updateStep4State(status) {
+  if (currentStep !== 4) return;
+  const card = $('step4-state-card');
+  const errCard = $('step4-error-card');
+  const hint = $('final-hint');
+  const footer = $('form-footer');
+  const qrInline = $('qr-inline');
+  const spinner = $('state-spinner');
+
+  if (!finalizingSetup) {
+    card?.classList.add('hidden');
+    errCard?.classList.add('hidden');
+    return;
+  }
+
+  // Esconde botoes Voltar/Salvar quando ja salvou
+  footer?.classList.add('hidden');
+  hint?.classList.add('hidden');
+
+  const bot = status?.botStatus;
+
+  // Estados de erro
+  if (bot === 'error' || bot === 'auth_failure' || bot === 'disconnected') {
+    card?.classList.add('hidden');
+    errCard?.classList.remove('hidden');
+    $('state-error-msg').textContent = STEP4_ERROR_COPY[bot] || `Status: ${bot}`;
+    return;
+  }
+
+  // Estados de progresso
+  const copy = STEP4_STATE_COPY[bot];
+  if (copy) {
+    errCard?.classList.add('hidden');
+    card?.classList.remove('hidden');
+    $('state-title').textContent = copy.title;
+    $('state-detail').textContent = copy.detail;
+    if (bot === 'ready') {
+      spinner?.classList.add('done');
+    } else {
+      spinner?.classList.remove('done');
+    }
+  }
+}
+
 function updateReadyView(status) {
   const isPaused = status?.botStatus === 'paused';
   const eyebrow = $('ready-eyebrow');
@@ -658,6 +727,7 @@ async function pollStatus() {
     updateOAuthButton(latestConfig);
     if (status.calendarConnected && !calendarsLoaded) loadCalendars();
     updateCalendarConnectState();
+    updateStep4State(status);
 
     if (status.botStatus === 'awaiting_qr') {
       show('section-setup');
@@ -806,10 +876,26 @@ $('btn-next').addEventListener('click', async () => {
 });
 
 $('btn-prev').addEventListener('click', () => {
+  // Se estiver em estado finalizado e clicar voltar, reseta o estado de finalizacao
+  if (finalizingSetup) {
+    finalizingSetup = false;
+    $('form-footer')?.classList.remove('hidden');
+    $('final-hint')?.classList.remove('hidden');
+    $('step4-state-card')?.classList.add('hidden');
+    $('step4-error-card')?.classList.add('hidden');
+  }
   showStep(currentStep - 1);
 });
 
 $('btn-selfchat-confirm')?.addEventListener('click', revealPhoneFields);
+
+$('btn-retry-save')?.addEventListener('click', async () => {
+  // Re-tenta: limpa o erro, reabre o footer e dispara o submit
+  $('step4-error-card')?.classList.add('hidden');
+  $('form-footer')?.classList.remove('hidden');
+  finalizingSetup = false;
+  $('form-setup').requestSubmit();
+});
 
 $('btn-load-models')?.addEventListener('click', loadGeminiModels);
 $('btn-load-calendars').addEventListener('click', () => {

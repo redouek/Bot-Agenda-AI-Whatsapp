@@ -13,6 +13,7 @@ import {
   listUsers,
   updateUserSettings,
   updateWhatsAppSession,
+  userIdToFolder,
 } from './database.js';
 
 const { Client, LocalAuth } = pkg;
@@ -73,7 +74,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
   console.log(`[index] Iniciando WhatsApp para usuario ${user.id} em ${sessionPath}`);
 
   const client = new Client({
-    authStrategy: new LocalAuth({ clientId: user.id, dataPath: sessionPath }),
+    authStrategy: new LocalAuth({ clientId: userIdToFolder(user.id), dataPath: sessionPath }),
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],

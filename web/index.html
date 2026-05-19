@@ -185,13 +185,29 @@
               <h3>Conecte o WhatsApp</h3>
             </div>
 
+            <div id="step4-state-card" class="state-card hidden">
+              <div class="state-spinner" id="state-spinner" aria-hidden="true"></div>
+              <div>
+                <strong id="state-title">Iniciando WhatsApp...</strong>
+                <p id="state-detail">Aguarde alguns segundos.</p>
+              </div>
+            </div>
+
+            <div id="step4-error-card" class="state-card error hidden">
+              <div>
+                <strong>Algo deu errado</strong>
+                <p id="state-error-msg">Verifique os logs ou tente novamente.</p>
+                <button type="button" class="btn-secondary" id="btn-retry-save">Tentar novamente</button>
+              </div>
+            </div>
+
             <div id="qr-inline" class="qr-inline hidden">
               <div id="qr-container"><p class="loading">Aguardando QR code...</p></div>
             </div>
             <p class="loading" id="final-hint">Salve para gerar o QR Code.</p>
           </div>
 
-          <div class="form-footer">
+          <div class="form-footer" id="form-footer">
             <button type="button" class="btn-ghost" id="btn-prev">Voltar</button>
             <button type="button" class="btn-primary" id="btn-next">Continuar</button>
             <button type="submit" class="btn-primary hidden" id="btn-save">Salvar</button>

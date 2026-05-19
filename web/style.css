@@ -234,6 +234,54 @@ a:hover { text-decoration: underline; }
   border-color: var(--green);
 }
 
+.state-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--mint);
+  border: 1px solid rgba(24, 160, 88, .25);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.state-card strong {
+  display: block;
+  font-size: 15px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.state-card p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+.state-card.error {
+  background: #fff5f5;
+  border-color: rgba(192, 56, 59, .35);
+}
+.state-card.error strong { color: #b32c30; }
+.state-card.error .btn-secondary {
+  margin-top: 8px;
+}
+.state-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(24, 160, 88, .2);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: state-spin .9s linear infinite;
+  flex-shrink: 0;
+}
+.state-spinner.done {
+  border: 3px solid var(--green);
+  border-top-color: var(--green);
+  animation: none;
+}
+@keyframes state-spin {
+  to { transform: rotate(360deg); }
+}
+
 .eyebrow {
   color: var(--green);
   font-size: .76rem;

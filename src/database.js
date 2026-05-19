@@ -24,8 +24,9 @@ function normalizeUserId(value) {
   return normalized || DEFAULT_USER_ID;
 }
 
-// Converte userId em nome de pasta seguro para o filesystem (sessoes do whatsapp).
-function userIdToFolder(userId) {
+// Converte userId em token seguro (alfanum + underscore + hifen).
+// Usado tanto para pasta de sessao quanto para clientId do LocalAuth do whatsapp-web.js.
+export function userIdToFolder(userId) {
   return String(userId || '')
     .replace(/[^a-z0-9_-]+/gi, '-')
     .replace(/-+/g, '-')
