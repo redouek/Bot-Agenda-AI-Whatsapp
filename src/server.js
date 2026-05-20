@@ -536,7 +536,17 @@ async function handleRequest(req, res, manager) {
     if (!uid) return;
     const currentUser = await getUser(uid);
     try {
-      return json(res, { calendars: await listCalendars(uid), selectedCalendarId: currentUser?.calendar_id || 'primary' });
+      let selectedCalendarIds = [];
+      if (currentUser?.calendar_ids) {
+        try { selectedCalendarIds = JSON.parse(currentUser.calendar_ids); } catch {}
+      }
+      if (!selectedCalendarIds.length && currentUser?.calendar_id) selectedCalendarIds = [currentUser.calendar_id];
+      return json(res, {
+        calendars: await listCalendars(uid),
+        selectedCalendarIds,
+        // Compat: front antigo
+        selectedCalendarId: selectedCalendarIds[0] || 'primary',
+      });
     } catch (error) {
       return json(res, { error: error.message, calendars: [] }, 400);
     }
@@ -546,9 +556,12 @@ async function handleRequest(req, res, manager) {
     const uid = requireUserSession(req, res);
     if (!uid) return;
     const body = await readBody(req);
-    const calendarId = body.GOOGLE_CALENDAR_ID || 'primary';
-    await updateUserSettings(uid, { calendarId });
-    return json(res, { ok: true, calendarId });
+    // Aceita { calendarIds: [...] } (novo) ou { GOOGLE_CALENDAR_ID: 'x' } (legado)
+    let calendarIds = body.calendarIds;
+    if (!calendarIds && body.GOOGLE_CALENDAR_ID) calendarIds = [body.GOOGLE_CALENDAR_ID];
+    if (!Array.isArray(calendarIds) || !calendarIds.length) calendarIds = ['primary'];
+    await updateUserSettings(uid, { calendarIds });
+    return json(res, { ok: true, calendarIds });
   }
 
   if (pathname === '/api/status') {

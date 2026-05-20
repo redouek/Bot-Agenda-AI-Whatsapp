@@ -115,14 +115,36 @@ async function getCalendarId(userId) {
   return user?.calendar_id || getConfig().GOOGLE_CALENDAR_ID || 'primary';
 }
 
+// Retorna todas as agendas selecionadas pelo usuario (array). Primeira = default.
+export async function getCalendarIds(userId) {
+  const user = await getUser(userId);
+  if (user?.calendar_ids) {
+    try {
+      const arr = JSON.parse(user.calendar_ids);
+      if (Array.isArray(arr) && arr.length) return arr;
+    } catch {}
+  }
+  // Fallback: usa calendar_id antigo (compat)
+  const fallback = user?.calendar_id || getConfig().GOOGLE_CALENDAR_ID || 'primary';
+  return [fallback];
+}
+
+// Resolve um calendarId pra criacao: usa o passado OU o default (primeiro da lista).
+async function resolveCreateCalendarId(userId, requestedCalendarId) {
+  if (requestedCalendarId) return requestedCalendarId;
+  const ids = await getCalendarIds(userId);
+  return ids[0];
+}
+
 async function getUserTimeZone(userId, fallback) {
   const user = await getUser(userId);
   return fallback || user?.timezone || getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
 }
 
-export async function createEvent(data, userId) {
+export async function createEvent(data, userId, calendarId) {
   const client = await getCalendarClient(userId);
   const timeZone = await getUserTimeZone(userId, data.timeZone);
+  const targetCalendarId = await resolveCreateCalendarId(userId, calendarId);
 
   const event = {
     summary: data.summary || 'Evento WhatsApp',
@@ -139,22 +161,41 @@ export async function createEvent(data, userId) {
     event.recurrence = Array.isArray(data.recurrence) ? data.recurrence : [data.recurrence];
   }
 
-  console.log('[calendar] Criando evento - summary:', event.summary);
-  const res = await client.events.insert({ calendarId: await getCalendarId(userId), requestBody: event });
-  return res.data;
+  console.log('[calendar] Criando evento em', targetCalendarId, '- summary:', event.summary);
+  const res = await client.events.insert({ calendarId: targetCalendarId, requestBody: event });
+  return { ...res.data, calendarId: targetCalendarId };
 }
 
+// Agrega eventos de TODAS as agendas do usuario, ordenados por start time
 export async function listEvents(startDateTime, endDateTime, userId) {
   const client = await getCalendarClient(userId);
-  const res = await client.events.list({
-    calendarId: await getCalendarId(userId),
-    timeMin: startDateTime,
-    timeMax: endDateTime,
-    singleEvents: true,
-    orderBy: 'startTime',
-    maxResults: 20,
+  const calendarIds = await getCalendarIds(userId);
+
+  const settled = await Promise.allSettled(calendarIds.map(calId =>
+    client.events.list({
+      calendarId: calId,
+      timeMin: startDateTime,
+      timeMax: endDateTime,
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 20,
+    }).then(res => (res.data.items || []).map(e => ({ ...e, calendarId: calId })))
+  ));
+
+  const all = [];
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled') all.push(...r.value);
+    else console.warn(`[calendar] Falha ao listar ${calendarIds[i]}:`, r.reason?.message);
   });
-  return res.data.items || [];
+
+  // Ordena por start time
+  all.sort((a, b) => {
+    const sa = a.start?.dateTime || a.start?.date || '';
+    const sb = b.start?.dateTime || b.start?.date || '';
+    return sa.localeCompare(sb);
+  });
+
+  return all;
 }
 
 export async function listCalendars(userId) {
@@ -174,23 +215,56 @@ export async function listCalendars(userId) {
 
 export async function searchEvents(query, daysAhead = 60, userId) {
   const client = await getCalendarClient(userId);
+  const calendarIds = await getCalendarIds(userId);
   const timeMin = new Date().toISOString();
   const timeMax = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
-  const res = await client.events.list({
-    calendarId: await getCalendarId(userId),
-    q: query,
-    timeMin,
-    timeMax,
-    singleEvents: true,
-    orderBy: 'startTime',
-    maxResults: 10,
+
+  const settled = await Promise.allSettled(calendarIds.map(calId =>
+    client.events.list({
+      calendarId: calId,
+      q: query,
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 10,
+    }).then(res => (res.data.items || []).map(e => ({ ...e, calendarId: calId })))
+  ));
+
+  const all = [];
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled') all.push(...r.value);
+    else console.warn(`[calendar] Falha ao buscar em ${calendarIds[i]}:`, r.reason?.message);
   });
-  return res.data.items || [];
+
+  all.sort((a, b) => {
+    const sa = a.start?.dateTime || a.start?.date || '';
+    const sb = b.start?.dateTime || b.start?.date || '';
+    return sa.localeCompare(sb);
+  });
+
+  return all;
 }
 
-export async function deleteEvent(eventId, userId) {
+// deleteEvent: precisa do calendarId onde o evento esta. Se nao passar, tenta cada agenda.
+export async function deleteEvent(eventId, userId, calendarId) {
   const client = await getCalendarClient(userId);
-  await client.events.delete({ calendarId: await getCalendarId(userId), eventId });
+  if (calendarId) {
+    await client.events.delete({ calendarId, eventId });
+    return;
+  }
+  // Fallback: tenta em cada agenda ate uma funcionar
+  const calendarIds = await getCalendarIds(userId);
+  let lastErr = null;
+  for (const calId of calendarIds) {
+    try {
+      await client.events.delete({ calendarId: calId, eventId });
+      return;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Evento nao encontrado em nenhuma agenda');
 }
 
 export async function getUpcomingReminders(minutesAhead = 15, userId) {

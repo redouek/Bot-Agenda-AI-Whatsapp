@@ -95,16 +95,16 @@
             </div>
 
             <div id="calendar-picker-card" class="calendar-picker hidden">
-              <label class="field compact">
-                <span>Calendario</span>
-                <div class="input-action">
-                  <select id="calendar-select" name="GOOGLE_CALENDAR_ID">
-                    <option value="primary">Agenda principal</option>
-                  </select>
-                  <button class="btn-ghost" id="btn-load-calendars" type="button">Atualizar</button>
+              <div class="field compact">
+                <span>Agendas</span>
+                <div id="calendar-checkboxes" class="calendar-checkboxes">
+                  <p class="loading">Carregando agendas...</p>
                 </div>
-                <small id="calendar-picker-status">Escolha onde os eventos serao criados.</small>
-              </label>
+                <div class="calendar-picker-actions">
+                  <button class="btn-ghost" id="btn-load-calendars" type="button">Atualizar lista</button>
+                </div>
+                <small id="calendar-picker-status">Selecione uma ou mais agendas. Quando o bot listar eventos, mostra de todas juntas. Para criar, se voce tem so 1 selecionada, vai nela; se tem mais, o bot pergunta na confirmacao qual usar.</small>
+              </div>
 
               <div class="field-grid">
                 <label class="field">

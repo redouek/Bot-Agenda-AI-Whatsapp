@@ -576,26 +576,40 @@ async function loadGeminiModels() {
   }
 }
 
-function setCalendarOptions(calendars = [], selectedCalendarId = 'primary') {
-  const select = $('calendar-select');
-  if (!select) return;
-  select.innerHTML = '';
+function setCalendarOptions(calendars = [], selectedCalendarIds = []) {
+  const container = $('calendar-checkboxes');
+  if (!container) return;
+  container.innerHTML = '';
 
   if (!calendars.length) {
-    select.innerHTML = '<option value="primary">Agenda principal</option>';
-    select.value = selectedCalendarId || 'primary';
+    container.innerHTML = '<p class="loading">Nenhuma agenda encontrada.</p>';
     return;
   }
 
-  calendars.forEach(calendar => {
-    const option = document.createElement('option');
-    option.value = calendar.id;
-    option.textContent = calendar.primary ? `${calendar.summary} (principal)` : calendar.summary;
-    select.appendChild(option);
-  });
+  // Se nada selecionado ainda, marca a principal por default
+  const selected = new Set(selectedCalendarIds);
+  if (selected.size === 0) {
+    const def = calendars.find(c => c.primary) || calendars[0];
+    if (def) selected.add(def.id);
+  }
 
-  const exists = Array.from(select.options).some(option => option.value === selectedCalendarId);
-  select.value = exists ? selectedCalendarId : (calendars.find(item => item.primary)?.id || calendars[0].id);
+  calendars.forEach(calendar => {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = calendar.id;
+    cb.checked = selected.has(calendar.id);
+    cb.addEventListener('change', () => {
+      saveSelectedCalendars().catch(err => {
+        $('calendar-picker-status').textContent = 'Erro: ' + err.message;
+      });
+    });
+    const text = document.createElement('span');
+    text.textContent = calendar.primary ? `${calendar.summary} (principal)` : calendar.summary;
+    label.appendChild(cb);
+    label.appendChild(text);
+    container.appendChild(label);
+  });
 }
 
 async function loadCalendars() {
@@ -608,30 +622,41 @@ async function loadCalendars() {
   }
 
   if (card) card.classList.remove('hidden');
-  status.textContent = 'Carregando calendários...';
 
   try {
     const res = await fetch(apiPath('/api/calendars'));
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Não foi possível carregar calendários.');
-    setCalendarOptions(data.calendars, data.selectedCalendarId);
-    status.textContent = 'Escolha onde os eventos serão criados.';
+    const selectedIds = data.selectedCalendarIds && data.selectedCalendarIds.length
+      ? data.selectedCalendarIds
+      : (data.selectedCalendarId ? [data.selectedCalendarId] : []);
+    setCalendarOptions(data.calendars, selectedIds);
     calendarsLoaded = true;
   } catch (error) {
-    status.textContent = error.message;
+    if (status) status.textContent = error.message;
   }
 }
 
-async function saveSelectedCalendar() {
-  const select = $('calendar-select');
-  if (!select?.value) return;
+async function saveSelectedCalendars() {
+  const container = $('calendar-checkboxes');
+  if (!container) return;
+  const checked = Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+  if (!checked.length) {
+    $('calendar-picker-status').textContent = 'Selecione pelo menos uma agenda.';
+    return;
+  }
   const res = await fetch(apiPath('/api/calendar/select'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ GOOGLE_CALENDAR_ID: select.value }),
+    body: JSON.stringify({ calendarIds: checked }),
   });
-  if (!res.ok) throw new Error('Não foi possível salvar o calendário.');
-  $('calendar-picker-status').textContent = 'Calendário salvo.';
+  if (!res.ok) throw new Error('Não foi possível salvar.');
+  const status = $('calendar-picker-status');
+  const original = status?.textContent || '';
+  if (status) {
+    status.textContent = `Salvo: ${checked.length} agenda(s).`;
+    setTimeout(() => { if (status) status.textContent = original; }, 2500);
+  }
 }
 
 function validateStep(step) {
@@ -870,7 +895,7 @@ tabs.forEach(tab => {
 $('btn-next').addEventListener('click', async () => {
   if (!validateStep(currentStep)) return;
   if (currentStep === 1 && currentStatus?.calendarConnected) {
-    await saveSelectedCalendar().catch(() => {});
+    await saveSelectedCalendars().catch(() => {});
   }
   showStep(currentStep + 1);
 });
@@ -901,11 +926,6 @@ $('btn-load-models')?.addEventListener('click', loadGeminiModels);
 $('btn-load-calendars').addEventListener('click', () => {
   calendarsLoaded = false;
   loadCalendars();
-});
-$('calendar-select').addEventListener('change', () => {
-  saveSelectedCalendar().catch(error => {
-    $('calendar-picker-status').textContent = error.message;
-  });
 });
 
 $('country-trigger').addEventListener('click', () => {

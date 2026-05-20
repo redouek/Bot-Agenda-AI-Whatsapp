@@ -1,5 +1,5 @@
 import { planConversationTurn } from './gemini.js';
-import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminders } from './calendar.js';
+import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminders, getCalendarIds, listCalendars } from './calendar.js';
 import { runLookup } from './knowledge.js';
 import { getConfig } from './config.js';
 import { getUser, updateUserSettings } from './database.js';
@@ -32,9 +32,33 @@ function normalizeText(value = '') {
 
 function detectConfirmation(text = '') {
   const normalized = normalizeText(text);
-  if (['sim', 's', 'confirmar', 'confirmo', 'ok', 'pode agendar', 'agendar'].includes(normalized)) return 'yes';
-  if (['nao', 'n', 'cancelar', 'cancela', 'cancelo', 'negar'].includes(normalized)) return 'no';
+  // "sim N" ou "s N" ou "ok N" — N = numero da agenda escolhida (1..9)
+  const withIndex = normalized.match(/^(sim|s|ok|confirmar|confirmo)\s+(\d+)$/);
+  if (withIndex) return { decision: 'yes', calendarIndex: parseInt(withIndex[2], 10) };
+  if (['sim', 's', 'confirmar', 'confirmo', 'ok', 'pode agendar', 'agendar'].includes(normalized)) return { decision: 'yes', calendarIndex: null };
+  if (['nao', 'n', 'cancelar', 'cancela', 'cancelo', 'negar'].includes(normalized)) return { decision: 'no', calendarIndex: null };
   return null;
+}
+
+// Pega nome amigavel das agendas (cache simples em memoria por userId)
+const calendarNamesCache = new Map();
+async function getCalendarNameMap(userId) {
+  if (calendarNamesCache.has(userId)) return calendarNamesCache.get(userId);
+  try {
+    const list = await listCalendars(userId);
+    const map = new Map(list.map(c => [c.id, c.summary]));
+    calendarNamesCache.set(userId, map);
+    setTimeout(() => calendarNamesCache.delete(userId), 5 * 60 * 1000); // expira em 5min
+    return map;
+  } catch { return new Map(); }
+}
+
+async function formatCalendarOptions(userId) {
+  const ids = await getCalendarIds(userId);
+  if (ids.length <= 1) return null;
+  const names = await getCalendarNameMap(userId);
+  const lines = ids.map((id, i) => `${i + 1}. ${names.get(id) || id}`);
+  return { ids, text: lines.join('\n') };
 }
 
 function formatDateOnly(dateValue, timeZone) {
@@ -87,20 +111,26 @@ function formatSingleEvent(event) {
   return lines.join('\n');
 }
 
-function formatPendingActionForConfirmation(pendingAction) {
+async function formatPendingActionForConfirmation(pendingAction, userId) {
+  const opts = userId ? await formatCalendarOptions(userId) : null;
+  const tail = opts
+    ? `\n\nEm qual agenda?\n${opts.text}\n\nResponda "sim N" (ex: "sim 1") ou "nao" para cancelar.`
+    : `\nEsta correto? Responda "sim" para agendar ou "nao" para cancelar.`;
+
   if (pendingAction?.type === 'multiple_events') {
     const lines = ['Eventos para confirmar:'];
     pendingAction.events.forEach((event, index) => {
       const timeZone = event.timeZone || getTimeZone();
       lines.push(`${index + 1}. ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`);
     });
-    lines.push('Esta correto? Responda "sim" para agendar ou "nao" para cancelar.');
-    return lines.join('\n');
+    return lines.join('\n') + tail;
   }
   if (pendingAction?.type === 'single_event' && pendingAction.event) {
-    return `${formatSingleEvent(pendingAction.event)}\nEsta correto? Responda "sim" para agendar ou "nao" para cancelar.`;
+    return `${formatSingleEvent(pendingAction.event)}${tail}`;
   }
-  return 'Responda "sim" para confirmar ou "nao" para cancelar.';
+  return opts
+    ? `Em qual agenda?\n${opts.text}\n\nResponda "sim N" ou "nao" para cancelar.`
+    : 'Responda "sim" para confirmar ou "nao" para cancelar.';
 }
 
 function formatLongWeekday(dateValue, timeZone) {
@@ -247,19 +277,22 @@ async function replyToMessage(userId, client, message, text) {
   }
 }
 
-async function createMultipleEvents(events, userId) {
+async function createMultipleEvents(events, userId, calendarId) {
   const created = [];
   for (const event of events) {
-    const result = await createEvent(event, userId);
+    const result = await createEvent(event, userId, calendarId);
     if (result?.id) created.push({ id: result.id, summary: event.summary });
   }
   return created;
 }
 
-async function handlePendingConfirmation(userId, client, message, chatId, decision) {
+async function handlePendingConfirmation(userId, client, message, chatId, confirmation) {
   const pendingKey = userScopedKey(userId, chatId);
   const pending = pendingActions.get(pendingKey);
   if (!pending) return false;
+
+  const decision = confirmation?.decision || confirmation; // compat
+  const calendarIndex = confirmation?.calendarIndex ?? null;
 
   if (decision === 'no') {
     pendingActions.delete(pendingKey);
@@ -269,14 +302,30 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
 
   try {
     if (pending.type === 'cancel_event') {
-      await deleteEvent(pending.eventId, userId);
+      await deleteEvent(pending.eventId, userId, pending.calendarId);
       pendingActions.delete(pendingKey);
       await replyToMessage(userId, client, message, `Evento "${pending.summary}" cancelado com sucesso.`);
       return true;
     }
 
     if (pending.type === 'multiple_events') {
-      const created = await createMultipleEvents(pending.events || [], userId);
+      // Para multiplos eventos, usa default ou o indice escolhido pra TODOS
+      const calendarIds = await getCalendarIds(userId);
+      let targetCalendarId = null;
+      if (calendarIds.length > 1) {
+        if (!calendarIndex) {
+          // Pede pra escolher
+          const opts = await formatCalendarOptions(userId);
+          await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda novamente com o numero da agenda desejada para TODOS os eventos:\n${opts.text}\n\nEx: "sim 1"`);
+          return true;
+        }
+        targetCalendarId = calendarIds[calendarIndex - 1];
+        if (!targetCalendarId) {
+          await replyToMessage(userId, client, message, `Numero ${calendarIndex} fora do intervalo. Responda com 1 a ${calendarIds.length}.`);
+          return true;
+        }
+      }
+      const created = await createMultipleEvents(pending.events || [], userId, targetCalendarId);
       pendingActions.delete(pendingKey);
       if (created.length) {
         const summary = created.map(item => `- ${item.summary}`).join('\n');
@@ -287,7 +336,23 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
       return true;
     }
 
-    const created = await createEvent(pending.event, userId);
+    // Single event: se ha >1 agenda e usuario nao escolheu, pede
+    const calendarIds = await getCalendarIds(userId);
+    let targetCalendarId = null;
+    if (calendarIds.length > 1) {
+      if (!calendarIndex) {
+        const opts = await formatCalendarOptions(userId);
+        await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda novamente com o numero da agenda desejada:\n${opts.text}\n\nEx: "sim 1"`);
+        return true;
+      }
+      targetCalendarId = calendarIds[calendarIndex - 1];
+      if (!targetCalendarId) {
+        await replyToMessage(userId, client, message, `Numero ${calendarIndex} fora do intervalo. Responda com 1 a ${calendarIds.length}.`);
+        return true;
+      }
+    }
+
+    const created = await createEvent(pending.event, userId, targetCalendarId);
     pendingActions.delete(pendingKey);
     if (created?.id) {
       await replyToMessage(userId, client, message, `Evento agendado com sucesso: ${pending.event.summary}.`);
@@ -351,9 +416,8 @@ export async function processIncomingMessage(userId, client, message) {
   if (plan.kind === 'schedule_proposal' && plan.event) {
     const nextPendingAction = { type: 'single_event', event: plan.event, createdAt: Date.now() };
     pendingActions.set(pendingKey, nextPendingAction);
-    const responseText = plan.reply
-      ? `${plan.reply}\n\n${formatPendingActionForConfirmation(nextPendingAction)}`
-      : formatPendingActionForConfirmation(nextPendingAction);
+    const confirmText = await formatPendingActionForConfirmation(nextPendingAction, userId);
+    const responseText = plan.reply ? `${plan.reply}\n\n${confirmText}` : confirmText;
     await replyToMessage(userId, client, message, responseText);
     return;
   }
@@ -393,7 +457,7 @@ export async function processIncomingMessage(userId, client, message) {
       const timeZone = getTimeZone();
       if (events.length === 1) {
         const e = events[0];
-        const nextPendingAction = { type: 'cancel_event', eventId: e.id, summary: e.summary, createdAt: Date.now() };
+        const nextPendingAction = { type: 'cancel_event', eventId: e.id, calendarId: e.calendarId, summary: e.summary, createdAt: Date.now() };
         pendingActions.set(pendingKey, nextPendingAction);
         const start = e.start?.dateTime || e.start?.date;
         await replyToMessage(
@@ -418,7 +482,8 @@ export async function processIncomingMessage(userId, client, message) {
       const lookupResult = await runLookup(plan.lookup);
       if (lookupResult.pendingAction) {
         pendingActions.set(pendingKey, lookupResult.pendingAction);
-        await replyToMessage(userId, client, message, `${lookupResult.reply}\n\n${formatPendingActionForConfirmation(lookupResult.pendingAction)}`);
+        const confirmText = await formatPendingActionForConfirmation(lookupResult.pendingAction, userId);
+        await replyToMessage(userId, client, message, `${lookupResult.reply}\n\n${confirmText}`);
         return;
       }
       await replyToMessage(userId, client, message, lookupResult.reply);

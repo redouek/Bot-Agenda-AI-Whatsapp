@@ -105,6 +105,13 @@ export async function initDatabase() {
   } catch {
     // Coluna ja existe
   }
+  // Migration: multiplas agendas (JSON array). Popula com [calendar_id] existente.
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN calendar_ids TEXT');
+    await db.exec(`UPDATE users SET calendar_ids = '["' || calendar_id || '"]' WHERE calendar_ids IS NULL AND calendar_id IS NOT NULL`);
+  } catch {
+    // Coluna ja existe
+  }
 
   await ensureUser({
     id: DEFAULT_USER_ID,
@@ -200,10 +207,29 @@ export async function updateUserSettings(userId, settings = {}) {
   await ensureUser({ id });
 
   const current = await getUser(id);
+
+  // Normaliza calendar_ids: aceita array, string ou JSON. calendar_id (legacy) = primeiro da array.
+  let nextCalendarIds = current.calendar_ids;
+  let nextCalendarId = current.calendar_id;
+  const incomingIds = settings.calendarIds ?? settings.calendar_ids;
+  if (incomingIds !== undefined) {
+    const arr = Array.isArray(incomingIds)
+      ? incomingIds.filter(Boolean)
+      : String(incomingIds || '').split(',').map(s => s.trim()).filter(Boolean);
+    nextCalendarIds = arr.length ? JSON.stringify(arr) : null;
+    nextCalendarId = arr[0] || null;
+  } else if (settings.calendarId !== undefined || settings.calendar_id !== undefined) {
+    // Compat: setar so um calendar_id armazena como array de 1 elemento
+    const single = settings.calendarId ?? settings.calendar_id;
+    nextCalendarId = single ?? null;
+    nextCalendarIds = single ? JSON.stringify([single]) : null;
+  }
+
   const next = {
     name: settings.name ?? current.name,
     email: settings.email ?? current.email,
-    calendar_id: settings.calendarId ?? settings.calendar_id ?? current.calendar_id,
+    calendar_id: nextCalendarId,
+    calendar_ids: nextCalendarIds,
     assistant_chat_id: settings.assistantChatId ?? settings.assistant_chat_id ?? current.assistant_chat_id,
     self_chat_lid: settings.selfChatLid ?? settings.self_chat_lid ?? current.self_chat_lid,
     timezone: settings.timezone ?? current.timezone,
@@ -212,10 +238,10 @@ export async function updateUserSettings(userId, settings = {}) {
   await db.run(
     `
       UPDATE users
-      SET name = ?, email = ?, calendar_id = ?, assistant_chat_id = ?, self_chat_lid = ?, timezone = ?, updated_at = ?
+      SET name = ?, email = ?, calendar_id = ?, calendar_ids = ?, assistant_chat_id = ?, self_chat_lid = ?, timezone = ?, updated_at = ?
       WHERE id = ?
     `,
-    [next.name, next.email, next.calendar_id, next.assistant_chat_id, next.self_chat_lid, next.timezone, nowIso(), id]
+    [next.name, next.email, next.calendar_id, next.calendar_ids, next.assistant_chat_id, next.self_chat_lid, next.timezone, nowIso(), id]
   );
 
   return getUser(id);
