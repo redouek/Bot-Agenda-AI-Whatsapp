@@ -103,14 +103,67 @@ function formatPendingActionForConfirmation(pendingAction) {
   return 'Responda "sim" para confirmar ou "nao" para cancelar.';
 }
 
+function formatLongWeekday(dateValue, timeZone) {
+  const parts = new Intl.DateTimeFormat('pt-BR', { timeZone, weekday: 'long' }).formatToParts(new Date(dateValue));
+  const w = parts.find(p => p.type === 'weekday')?.value || '';
+  const first = w.split('-')[0]; // "segunda-feira" -> "segunda"
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+function formatShortDate(dateValue, timeZone) {
+  const parts = new Intl.DateTimeFormat('pt-BR', {
+    timeZone, day: '2-digit', month: '2-digit', year: '2-digit',
+  }).formatToParts(new Date(dateValue));
+  const get = (type) => parts.find(p => p.type === type)?.value || '';
+  return `${get('day')}/${get('month')}/${get('year')}`;
+}
+
+function getDayKey(dateValue, timeZone) {
+  // Chave ISO local pra agrupar (ex: "2026-05-25" no fuso do usuario)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(dateValue));
+  const get = (type) => parts.find(p => p.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 function formatEventsList(events, timeZone) {
   if (!events.length) return 'Nenhum evento encontrado.';
-  return events.map((e, i) => {
+
+  // Agrupa por dia
+  const byDay = new Map();
+  for (const e of events) {
     const start = e.start?.dateTime || e.start?.date;
-    const time = e.start?.dateTime ? formatTimeOnly(start, timeZone) : 'dia inteiro';
-    const date = formatDateOnly(start, timeZone);
-    return `${i + 1}. ${e.summary} - ${date} ${time}`;
-  }).join('\n');
+    if (!start) continue;
+    const key = getDayKey(start, timeZone);
+    if (!byDay.has(key)) byDay.set(key, { firstStart: start, events: [] });
+    byDay.get(key).events.push(e);
+  }
+
+  // Dias em ordem cronologica
+  const days = Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b));
+
+  return days.map(([, { firstStart, events: dayEvents }], i) => {
+    const weekday = formatLongWeekday(firstStart, timeZone);
+    const shortDate = formatShortDate(firstStart, timeZone);
+
+    // Eventos do dia ordenados por hora de inicio
+    const sorted = dayEvents.slice().sort((a, b) => {
+      const sa = a.start?.dateTime || a.start?.date || '';
+      const sb = b.start?.dateTime || b.start?.date || '';
+      return sa.localeCompare(sb);
+    });
+
+    const lines = sorted.map(e => {
+      const start = e.start?.dateTime || e.start?.date;
+      if (e.start?.dateTime) {
+        return `- ${formatTimeOnly(start, timeZone)} ${e.summary}`;
+      }
+      return `- ${e.summary} (dia inteiro)`;
+    }).join('\n');
+
+    return `${i + 1}. ${weekday} ${shortDate}\n${lines}`;
+  }).join('\n\n');
 }
 
 function getPeriodRange(period, startDate, endDate) {
