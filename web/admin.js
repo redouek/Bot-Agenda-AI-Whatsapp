@@ -74,13 +74,13 @@ async function loadUsers() {
       const adminBadge = u.isAdmin ? ' <span class="badge admin">Admin</span>' : '';
       return `
         <tr>
-          <td><strong>${escape(u.name || u.id)}</strong>${adminBadge}<br><small>${escape(u.email || u.id)}</small></td>
-          <td>${formatPhone(u.phone)}</td>
-          <td>${calBadge}</td>
-          <td>${lidBadge}</td>
-          <td>${statusLabel}</td>
-          <td><small>${formatDate(u.lastReadyAt)}</small></td>
-          <td class="row-actions">${pauseBtn} ${adminBtn} ${deleteBtn}</td>
+          <td data-label="Usuario"><strong>${escape(u.name || u.id)}</strong>${adminBadge}<br><small>${escape(u.email || u.id)}</small></td>
+          <td data-label="Telefone">${formatPhone(u.phone)}</td>
+          <td data-label="Calendar">${calBadge}</td>
+          <td data-label="LID">${lidBadge}</td>
+          <td data-label="Bot">${statusLabel}</td>
+          <td data-label="Ultimo ready"><small>${formatDate(u.lastReadyAt)}</small></td>
+          <td data-label="Acoes" class="row-actions">${pauseBtn} ${adminBtn} ${deleteBtn}</td>
         </tr>
       `;
     }).join('');
