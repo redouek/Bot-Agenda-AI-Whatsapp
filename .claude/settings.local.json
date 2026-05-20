@@ -26,7 +26,19 @@
       "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-test-api.mjs\" agenda-server:/tmp/testapi.mjs)",
       "PowerShell(ssh agenda-server \"docker cp /tmp/testapi.mjs agenda-ai-whatsapp-bot-1:/tmp/testapi.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/testapi.mjs\")",
       "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-test-variants.mjs\" agenda-server:/tmp/variants.mjs)",
-      "PowerShell(ssh agenda-server \"docker cp /tmp/variants.mjs agenda-ai-whatsapp-bot-1:/tmp/variants.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/variants.mjs\")"
+      "PowerShell(ssh agenda-server \"docker cp /tmp/variants.mjs agenda-ai-whatsapp-bot-1:/tmp/variants.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/variants.mjs\")",
+      "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-fixtures.mjs\" agenda-server:/tmp/fixtures.mjs)",
+      "PowerShell(ssh agenda-server \"docker cp /tmp/fixtures.mjs agenda-ai-whatsapp-bot-1:/tmp/fixtures.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/fixtures.mjs\")",
+      "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-fixtures2.mjs\" agenda-server:/tmp/fixtures2.mjs)",
+      "PowerShell(ssh agenda-server \"docker cp /tmp/fixtures2.mjs agenda-ai-whatsapp-bot-1:/tmp/fixtures2.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/fixtures2.mjs\")",
+      "Bash(curl -s \"https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=Sao+Paulo\")",
+      "Bash(curl -s \"https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=Sao+Paulo+FC\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); teams=d.get\\('teams',[]\\) or []; [print\\(f\\\\\"id={t['idTeam']} | {t['strTeam']} | {t.get\\('strLeague',''\\)} | {t.get\\('strLocation',''\\)}\\\\\"\\) for t in teams if 'Sao Paulo' in \\(t.get\\('strTeam'\\) or ''\\) or 'São Paulo' in \\(t.get\\('strTeam'\\) or ''\\) or 'Sao Paulo' in \\(t.get\\('strTeamAlternate'\\) or ''\\)]\")",
+      "Bash(curl -s \"https://www.thesportsdb.com/api/v1/json/3/search_all_teams.php?l=Brazilian%20Serie%20A\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); teams=d.get\\('teams',[]\\) or []; print\\(f'Total: {len\\(teams\\)}'\\); [print\\(f\\\\\"id={t['idTeam']} | {t['strTeam']}\\\\\"\\) for t in teams[:25]]\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); teams=d.get\\('teams',[]\\) or []; print\\(f'Total: {len\\(teams\\)}'\\); [print\\(f\\\\\"id={t['idTeam']} | {t['strTeam']}\\\\\"\\) for t in teams]\")",
+      "Bash(curl -s \"https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=Sao%20Paulo\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); teams=d.get\\('teams',[]\\) or []; print\\(f'Total: {len\\(teams\\)}'\\); [print\\(f\\\\\"id={t['idTeam']} | {t['strTeam']} | {t.get\\('strLeague',''\\)}\\\\\"\\) for t in teams]\")"
     ]
   }
 }

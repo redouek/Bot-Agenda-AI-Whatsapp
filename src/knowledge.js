@@ -1,9 +1,10 @@
 import { getConfig } from './config.js';
 import { getUser } from './database.js';
 
-// Migrado para api-football.com (api-sports.io) — free tier inclui Brasileirão.
-// FOOTBALL_DATA_KEY (nome do env mantido por compat) agora deve ser a key do api-sports.io.
-const FOOTBALL_API_BASE_URL = 'https://v3.football.api-sports.io';
+// Usa football-data.org (free tier cobre principais ligas europeias + Mundial + Copa America).
+// IMPORTANTE: free tier NAO cobre Brasileirao (precisa de plano Tier Two pago).
+// A key do usuario fica em users.football_api_key (per-user).
+const FOOTBALL_API_BASE_URL = 'https://api.football-data.org/v4';
 
 // Mapa: nome exato da API (inglês) → { pt: nome em português, flag: emoji }
 const NATIONAL_TEAMS = {
@@ -143,107 +144,62 @@ async function getUserApiKey(userId) {
 async function apiHeaders(userId) {
   const key = await getUserApiKey(userId);
   if (!key) throw new Error('NO_FOOTBALL_KEY');
-  return { 'x-apisports-key': key };
+  return { 'X-Auth-Token': key };
 }
 
-// Sanitiza query para api-sports.io: API aceita SO alfanumerico e espaco.
-// Remove acentos, pontuacao e caracteres especiais.
-function sanitizeApiQuery(query) {
-  return String(query || '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // tira acentos
-    .replace(/[^a-zA-Z0-9 ]/g, ' ')              // tira pontuacao
-    .replace(/\s+/g, ' ').trim();
-}
-
-// Gera variantes para tentar: query original sanitizada + sem sufixo de clube (FC/SC/EC)
-function buildSearchVariants(query) {
-  const base = sanitizeApiQuery(query);
-  if (!base) return [];
-  const variants = [base];
-  // Sufixos comuns de clube que a api-sports as vezes nao aceita junto do nome
-  const suffixMatch = base.match(/^(.+?)\s+(FC|SC|EC|AC|CF)$/i);
-  if (suffixMatch) variants.push(suffixMatch[1]);
-  const prefixMatch = base.match(/^(FC|AC|SC|EC)\s+(.+)$/i);
-  if (prefixMatch) variants.push(prefixMatch[2]);
-  return variants;
-}
-
-// Busca time via api-sports.io: retorna { team, venue, score } do melhor match
+// Busca time via football-data.org: retorna { team, score } do melhor match
 async function searchTeamByName(query, userId) {
-  const variants = buildSearchVariants(query);
-  if (!variants.length) return null;
-  const headers = await apiHeaders(userId);
+  const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(query)}&limit=10`;
+  const json = await fetchJson(url, { headers: await apiHeaders(userId) });
+  const teams = json?.teams || [];
+  if (!teams.length) return null;
 
-  let items = [];
-  let usedVariant = '';
-  for (const variant of variants) {
-    const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(variant)}`;
-    const json = await fetchJson(url, { headers });
-    if (json?.errors?.search) {
-      console.warn(`[football] API rejeitou "${variant}":`, json.errors.search);
-      continue;
-    }
-    if (json?.response?.length) {
-      items = json.response;
-      usedVariant = variant;
-      break;
-    }
-  }
-
-  if (!items.length) return null;
-
-  // Score: prefere match exato. Usa query ORIGINAL normalizada (com acento removido) pro scoring
   const q = normalizeForSearch(query);
-  const scored = items.map(item => {
-    const t = item.team || {};
+  const scored = teams.map(t => {
     const name = normalizeForSearch(t.name);
-    const code = normalizeForSearch(t.code);
+    const shortName = normalizeForSearch(t.shortName);
+    const tla = normalizeForSearch(t.tla);
     let score = 0;
-    if (name === q) score += 100;
-    else if (name === `${q} fc` || name === `${q} sc` || name === `${q} ec`) score += 90;
-    else if (`${name} fc` === q || `${name} sc` === q || `${name} ec` === q) score += 90; // query veio com FC, time sem
-    else if (name.startsWith(q)) score += 50;
-    else if (q.startsWith(name)) score += 40;
-    else if (name.includes(q)) score += 20;
-    if (code && code === q.slice(0, 3)) score += 30;
+    if (name === q || shortName === q) score += 100;
+    else if (name === `${q} fc` || shortName === `${q} fc`) score += 90;
+    else if (`${name} fc` === q || `${shortName} fc` === q) score += 90;
+    else if (name.startsWith(q) || shortName.startsWith(q)) score += 50;
+    else if (q.startsWith(name) || q.startsWith(shortName)) score += 40;
+    else if (name.includes(q) || shortName.includes(q)) score += 20;
+    if (tla && tla === q.slice(0, 3)) score += 30;
     if (t.founded) score += 5;
-    if (t.national) score -= 10;
-    return { team: t, venue: item.venue, score };
+    return { team: t, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
-  console.log(`[football] search "${query}" (api: "${usedVariant}") -> top:`, scored.slice(0, 3).map(s => `${s.team.name} (${s.team.country}, id=${s.team.id}, score=${s.score})`));
+  console.log(`[football] search "${query}" -> top:`, scored.slice(0, 3).map(s => `${s.team.name} (id=${s.team.id}, score=${s.score})`));
   return scored[0] || null;
 }
 
-// /fixtures?team={id}&next={n} retorna os proximos N jogos
+// /teams/{id}/matches?status=SCHEDULED&dateFrom&dateTo
 async function getUpcomingFixtures(teamId, userId, max = 5) {
-  const url = `${FOOTBALL_API_BASE_URL}/fixtures?team=${teamId}&next=${max}`;
+  const today = new Date().toISOString().split('T')[0];
+  const until = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const url = `${FOOTBALL_API_BASE_URL}/teams/${teamId}/matches?status=SCHEDULED&dateFrom=${today}&dateTo=${until}&limit=${max}`;
   const json = await fetchJson(url, { headers: await apiHeaders(userId) });
-  return json?.response || [];
+  return json?.matches || [];
 }
 
-function formatFixtureLine(fixture, index) {
-  const f = fixture.fixture || {};
-  const teams = fixture.teams || {};
-  const league = fixture.league || {};
-  const when = formatDateTime(f.date);
-  const home = formatHome(teams.home?.name || 'Time da casa');
-  const away = formatAway(teams.away?.name || 'Visitante');
-  const competition = league.name ? ` (${league.name})` : '';
-  const venue = f.venue?.name ? ` — ${f.venue.name}${f.venue.city ? `/${f.venue.city}` : ''}` : '';
+function formatFixtureLine(match, index) {
+  const when = formatDateTime(match.utcDate);
+  const home = formatHome(match.homeTeam?.name || 'Time da casa');
+  const away = formatAway(match.awayTeam?.name || 'Visitante');
+  const competition = match.competition?.name ? ` (${match.competition.name})` : '';
+  const venue = match.venue ? ` — ${match.venue}` : '';
   return `${index + 1}. ${when} - ${home} x ${away}${competition}${venue}`;
 }
 
-function fixtureToCalendarEvent(fixture) {
-  const f = fixture.fixture || {};
-  const teams = fixture.teams || {};
-  const league = fixture.league || {};
-  const startDate = new Date(f.date);
+function fixtureToCalendarEvent(match) {
+  const startDate = new Date(match.utcDate);
   const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000);
-  const home = formatHome(teams.home?.name || 'Time da casa');
-  const away = formatAway(teams.away?.name || 'Visitante');
-  const competition = league.name || '';
+  const home = formatHome(match.homeTeam?.name || 'Time da casa');
+  const away = formatAway(match.awayTeam?.name || 'Visitante');
+  const competition = match.competition?.name || '';
   const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
 
   return {
@@ -251,9 +207,16 @@ function fixtureToCalendarEvent(fixture) {
     description: competition,
     startDateTime: startDate.toISOString(),
     endDateTime: endDate.toISOString(),
-    location: f.venue?.name ? `${f.venue.name}${f.venue.city ? ` - ${f.venue.city}` : ''}` : '',
+    location: match.venue || '',
     timeZone,
   };
+}
+
+// Heuristica: time provavelmente brasileiro? (pra dar mensagem amigavel sobre limitacao do plano)
+const BR_HINTS = ['sao paulo', 'palmeiras', 'corinthians', 'santos', 'flamengo', 'fluminense', 'botafogo', 'vasco', 'gremio', 'internacional', 'atletico', 'cruzeiro', 'bahia', 'fortaleza', 'ceara', 'sport', 'recife', 'goias', 'coritiba', 'athletico', 'bragantino', 'red bull bragantino', 'cuiaba', 'juventude', 'america mg', 'chapecoense'];
+function looksBrazilian(query) {
+  const q = normalizeForSearch(query);
+  return BR_HINTS.some(h => q.includes(h));
 }
 
 async function lookupFootball(query, userId) {
@@ -263,7 +226,7 @@ async function lookupFootball(query, userId) {
   const userKey = await getUserApiKey(userId);
   if (!userKey) {
     return {
-      reply: 'Para consultar jogos, configure sua chave da api-sports.io no painel (Onboarding → Extras → "API de Futebol"). Conta gratuita em https://dashboard.api-football.com/register.',
+      reply: 'Para consultar jogos, configure sua chave da football-data.org no painel (Onboarding → Extras → "API de Futebol"). Conta gratuita em https://www.football-data.org/client/register.',
       pendingAction: null,
     };
   }
@@ -274,7 +237,14 @@ async function lookupFootball(query, userId) {
   } catch (err) {
     if (err.message === 'NO_FOOTBALL_KEY') {
       return {
-        reply: 'Para consultar jogos, configure sua chave da api-sports.io no painel (Extras).',
+        reply: 'Para consultar jogos, configure sua chave da football-data.org no painel (Extras).',
+        pendingAction: null,
+      };
+    }
+    // Erro de auth (401) ou outro
+    if (String(err.message).includes('HTTP 401') || String(err.message).includes('HTTP 403')) {
+      return {
+        reply: 'A chave da football-data.org parece invalida ou expirou. Atualize em Onboarding → Extras.',
         pendingAction: null,
       };
     }
@@ -282,29 +252,45 @@ async function lookupFootball(query, userId) {
   }
 
   if (!found?.team?.id) {
+    if (looksBrazilian(query)) {
+      return {
+        reply: `Não encontrei "${query}". O plano gratuito da football-data.org cobre principais ligas europeias (Premier League, La Liga, Bundesliga, Serie A, Ligue 1), Champions League, Copa do Mundo e Copa América — mas NÃO cobre Brasileirão. Pra times brasileiros precisaria do plano Tier Two (pago).`,
+        pendingAction: null,
+      };
+    }
     return {
-      reply: `Não encontrei o time "${query}". Tente o nome oficial (ex: "Sao Paulo", "Flamengo", "Real Madrid", "Manchester City").`,
+      reply: `Não encontrei o time "${query}". Tente o nome oficial em inglês (ex: "Real Madrid", "Manchester City", "Bayern", "Brazil").`,
       pendingAction: null,
     };
   }
 
   if (found.score < 15) {
     return {
-      reply: `Não encontrei nenhum time chamado "${query}" com confiança suficiente. Tente especificar mais (ex: "Sao Paulo", "Atletico Mineiro").`,
+      reply: `Não encontrei nenhum time chamado "${query}" com confiança suficiente. Tente o nome oficial (ex: "Real Madrid", "Bayern Munich").`,
       pendingAction: null,
     };
   }
 
   const teamId = found.team.id;
   const teamName = found.team.name || query;
-  const country = found.team.country ? ` (${found.team.country})` : '';
-  console.log('[football] Selecionado:', teamName, country, 'ID:', teamId);
+  console.log('[football] Selecionado:', teamName, 'ID:', teamId);
 
-  const fixtures = await getUpcomingFixtures(teamId, userId);
+  let fixtures = [];
+  try {
+    fixtures = await getUpcomingFixtures(teamId, userId);
+  } catch (err) {
+    if (String(err.message).includes('HTTP 403')) {
+      return {
+        reply: `Encontrei o time *${teamName}*, mas sua key não tem permissão para os jogos dele (provavelmente liga fora do plano gratuito).`,
+        pendingAction: null,
+      };
+    }
+    throw err;
+  }
 
   if (!fixtures.length) {
     return {
-      reply: `Não encontrei próximos jogos agendados para ${teamName}${country}. Pode ser que ainda não estejam publicados.`,
+      reply: `Não encontrei próximos jogos agendados para *${teamName}*. Pode ser entressafra ou competição fora do plano gratuito (ex: Brasileirão exige Tier Two).`,
       pendingAction: null,
     };
   }
@@ -313,7 +299,7 @@ async function lookupFootball(query, userId) {
   const events = fixtures.map(m => fixtureToCalendarEvent(m));
 
   return {
-    reply: `Próximos jogos de *${teamName}*${country}:\n${lines.join('\n')}\n\nQuer que eu adicione esses eventos na sua agenda?`,
+    reply: `Próximos jogos de *${teamName}*:\n${lines.join('\n')}\n\nQuer que eu adicione esses eventos na sua agenda?`,
     pendingAction: {
       type: 'multiple_events',
       events,
