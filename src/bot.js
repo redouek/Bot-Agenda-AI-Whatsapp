@@ -84,13 +84,13 @@ function formatPendingActionForConfirmation(pendingAction) {
       const timeZone = event.timeZone || getTimeZone();
       lines.push(`${index + 1}. ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`);
     });
-    lines.push('Esta correto? Reaja com 👍 para confirmar ou 👎 para cancelar (ou responda sim/nao).');
+    lines.push('Esta correto? Responda "sim" para agendar ou "nao" para cancelar.');
     return lines.join('\n');
   }
   if (pendingAction?.type === 'single_event' && pendingAction.event) {
-    return `${formatSingleEvent(pendingAction.event)}\nEsta correto? Reaja com 👍 para confirmar ou 👎 para cancelar (ou responda sim/nao).`;
+    return `${formatSingleEvent(pendingAction.event)}\nEsta correto? Responda "sim" para agendar ou "nao" para cancelar.`;
   }
-  return 'Reaja com 👍 para confirmar ou 👎 para cancelar (ou responda sim/nao).';
+  return 'Responda "sim" para confirmar ou "nao" para cancelar.';
 }
 
 function formatEventsList(events, timeZone) {
@@ -239,53 +239,6 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
   }
 }
 
-const CONFIRM_EMOJIS = new Set(['👍', '✅', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿']);
-const CANCEL_EMOJIS = new Set(['👎', '❌', '👎🏻', '👎🏼', '👎🏽', '👎🏾', '👎🏿']);
-const processedReactionIds = new Set();
-
-export async function processReaction(userId, client, reaction) {
-  try {
-    const emoji = reaction?.reaction || '';
-    if (!emoji) return; // reaction removed
-
-    let decision = null;
-    if (CONFIRM_EMOJIS.has(emoji)) decision = 'yes';
-    else if (CANCEL_EMOJIS.has(emoji)) decision = 'no';
-    else return;
-
-    // Dedup por id da reaction
-    const rid = reaction?.id?._serialized || reaction?.msgId?._serialized || '';
-    if (rid) {
-      const key = userScopedKey(userId, 'r:' + rid);
-      if (processedReactionIds.has(key)) return;
-      processedReactionIds.add(key);
-      if (processedReactionIds.size > 500) {
-        const first = processedReactionIds.values().next().value;
-        if (first) processedReactionIds.delete(first);
-      }
-    }
-
-    const reactedChatId = reaction?.msgId?.remote?._serialized || '';
-    const CHAT_ID = await getAssistantChatId(userId);
-    const selfLid = selfChatLidByUser.get(userId);
-    const isSelfChat = reactedChatId === CHAT_ID || (selfLid && reactedChatId === selfLid);
-    if (!isSelfChat) return;
-
-    console.log(`[bot:${userId}] Reaction ${emoji} -> ${decision}`);
-
-    const stubMessage = {
-      id: { _serialized: rid || `reaction_${Date.now()}` },
-      fromMe: true,
-      body: emoji,
-      reply: async (text) => client.sendMessage(CHAT_ID, text),
-    };
-
-    await handlePendingConfirmation(userId, client, stubMessage, CHAT_ID, decision);
-  } catch (err) {
-    console.error(`[bot:${userId}] Erro em processReaction:`, err);
-  }
-}
-
 export async function processIncomingMessage(userId, client, message) {
   // Verifica self-chat ANTES do dedup (evita adicionar ID e bloquear polling depois)
   let chat;
@@ -384,7 +337,7 @@ export async function processIncomingMessage(userId, client, message) {
           userId,
           client,
           message,
-          `Quer cancelar "${e.summary}" (${formatDateOnly(start, timeZone)} ${e.start?.dateTime ? formatTimeOnly(start, timeZone) : ''})?\nReaja com 👍 para confirmar ou 👎 para cancelar (ou responda sim/nao).`
+          `Quer cancelar "${e.summary}" (${formatDateOnly(start, timeZone)} ${e.start?.dateTime ? formatTimeOnly(start, timeZone) : ''})?\nResponda "sim" para confirmar ou "nao" para cancelar.`
         );
         return;
       }

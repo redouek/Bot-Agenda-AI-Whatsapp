@@ -2,7 +2,7 @@ import fs from 'fs';
 import pkg from 'whatsapp-web.js';
 import { loadConfig, isPlatformConfigured } from './config.js';
 import { startServer } from './server.js';
-import { processIncomingMessage, processReaction, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
+import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
 import {
   deleteUser,
   ensureUser,
@@ -150,14 +150,6 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
       await processIncomingMessage(user.id, client, message);
     } catch (error) {
       console.error(`[bot:${user.id}] Erro no fluxo de message_create:`, error);
-    }
-  });
-
-  client.on('message_reaction', async reaction => {
-    try {
-      await processReaction(user.id, client, reaction);
-    } catch (error) {
-      console.error(`[bot:${user.id}] Erro no fluxo de message_reaction:`, error);
     }
   });
 
