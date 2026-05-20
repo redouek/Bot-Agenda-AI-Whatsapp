@@ -363,7 +363,7 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   gap: 14px;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: visible;
 }
 
 .topbar {
@@ -910,8 +910,13 @@ footer {
     width: min(100% - 20px, 720px);
     min-height: calc(100vh - 20px);
     height: auto;
+    overflow: visible;
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
+  }
+
+  .app-shell:has(.brand-panel--compact) {
+    grid-template-columns: 1fr;
   }
 
   .brand-panel {
@@ -937,6 +942,7 @@ footer {
   .workspace {
     min-height: 0;
     overflow: visible;
+    padding: 18px;
   }
 
   .panel {
@@ -981,6 +987,7 @@ footer {
 }
 
 @media (max-width: 640px) {
+  /* ---------- Container principal ---------- */
   .app-shell {
     width: 100%;
     min-height: 100vh;
@@ -988,129 +995,159 @@ footer {
     margin: 0;
     border-radius: 0;
     border: 0;
+    overflow: visible;
   }
 
-  .workspace { padding: 14px; gap: 10px; }
+  .workspace { padding: 14px; gap: 12px; }
+
+  /* ---------- Faixa verde (header) ---------- */
   .brand-panel {
-    padding: 12px 14px;
-    position: sticky;
-    top: 0;
-    z-index: 30;
+    padding: 10px 14px;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
   }
 
-  .brand-mark, .brand-panel .eyebrow, .brand-copy { display: none; }
-  .brand-panel h1 { font-size: 1.25rem; margin: 0; }
-  .brand-header { margin-bottom: 0; justify-content: flex-end; }
-  .brand-header + .eyebrow + h1 { display: none; }
+  .brand-panel .eyebrow,
+  .brand-copy,
+  .brand-panel h1 { display: none; }
+
+  .brand-header {
+    margin-bottom: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 10px;
+  }
+
+  .brand-panel--compact .brand-header {
+    flex-direction: row;
+  }
+
+  .brand-mark { width: 36px; height: 36px; }
+
   .btn-admin-access {
-    min-height: 40px;
-    height: 40px;
+    height: 36px;
     padding: 0 12px;
+    font-size: 11px;
   }
 
+  /* ---------- Topbar interno ---------- */
   .topbar {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
   }
 
-  .topbar .eyebrow { display: none; }
-  .topbar h2 { font-size: 1.15rem; margin: 0; }
+  .topbar .eyebrow { font-size: .68rem; }
+  .topbar h2 { font-size: 1.2rem; margin: 2px 0 0; }
 
   .topbar-actions {
     width: 100%;
     align-items: stretch;
-    justify-content: space-between;
     flex-wrap: wrap;
+    gap: 8px;
   }
 
   .status-pill {
-    max-width: none;
-    flex: 1 1 150px;
+    flex: 1 1 100%;
     border-radius: 8px;
     font-size: .8rem;
     padding: 8px 10px;
+    text-align: center;
   }
 
   .user-info {
     width: 100%;
     flex-wrap: wrap;
-    align-items: stretch;
+    align-items: center;
+    gap: 8px;
   }
 
   .user-info #user-email {
+    flex: 1 1 auto;
     max-width: 100%;
     overflow-wrap: anywhere;
     border-radius: 8px;
+    font-size: 12px;
   }
 
-  .user-info .btn-ghost { flex: 1 1 100%; }
+  .user-info .btn-ghost { flex: 0 0 auto; min-height: 36px; }
 
+  /* ---------- Stepper ---------- */
   .stepper {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    position: sticky;
-    top: 64px;
-    z-index: 25;
-    background: rgba(238, 243, 240, .96);
-    padding: 6px 0;
+    gap: 4px;
   }
 
   .step-tab {
     min-width: 0;
     font-size: 0;
-    padding: 7px 4px;
+    padding: 8px 4px;
   }
 
   .step-tab span { margin-right: 0; }
 
-  .panel { padding: 16px; }
+  /* ---------- Painel e formularios ---------- */
+  .panel { padding: 16px; border-radius: 10px; }
   .panel-heading { margin-bottom: 14px; }
   .panel-heading h3 { font-size: 1.12rem; }
   .panel-heading p { font-size: .92rem; }
+
   .field-grid, .phone-grid { grid-template-columns: 1fr; gap: 0; }
-  .launch-card, .connect-card { align-items: stretch; flex-direction: column; }
+  .launch-card, .connect-card { align-items: stretch; flex-direction: column; gap: 12px; }
   .launch-card button, .connect-card button, .form-footer button, .input-action button, .btn-google, .cta-link { width: 100%; }
   .input-action { grid-template-columns: 1fr; }
+
+  /* Footer com botoes na ordem natural (Voltar primeiro, Avancar depois) */
   .form-footer, .actions, .modal-actions {
     align-items: stretch;
-    flex-direction: column-reverse;
+    flex-direction: column;
   }
+  .form-footer { gap: 8px; }
+  .form-footer #btn-prev { order: 2; }
+  .form-footer #btn-next,
+  .form-footer #btn-save { order: 1; }
 
   button, .btn-google, .cta-link { justify-content: center; min-height: 44px; }
 
-  .selfchat-instructions {
-    padding: 16px;
-  }
+  /* ---------- Selfchat gate ---------- */
+  .selfchat-instructions { padding: 16px; }
+  .selfchat-instructions .btn-primary { justify-self: stretch; }
+  .selfchat-steps { padding-left: 18px; }
 
-  .selfchat-instructions .btn-primary {
-    justify-self: stretch;
-  }
+  /* ---------- Bot conectado ---------- */
+  .account-actions { grid-template-columns: 1fr; }
+  .status-item { align-items: flex-start; padding: 13px; }
 
-  .account-actions {
-    grid-template-columns: 1fr;
-  }
+  /* ---------- QR ---------- */
+  #qr-container, .qr-standalone { min-height: 200px; }
+  #qr-container svg, .qr-standalone svg { width: min(220px, 100%); height: auto; }
 
-  .status-item {
-    align-items: flex-start;
-    padding: 13px;
-  }
+  /* ---------- Country combo ---------- */
+  .country-list { max-height: 220px; }
 
-  #qr-container, .qr-standalone { min-height: 180px; }
-  #qr-container svg, .qr-standalone svg { width: min(160px, 100%); }
-
+  /* ---------- Modal: bottom-sheet ---------- */
   .modal-backdrop {
     align-items: flex-end;
-    padding: 10px;
+    padding: 0;
   }
-
   .modal {
-    max-height: calc(100vh - 20px);
+    max-height: 90vh;
     overflow-y: auto;
-    border-radius: 8px;
-    padding: 18px;
+    border-radius: 14px 14px 0 0;
+    padding: 20px 18px;
+    max-width: 100%;
+    width: 100%;
   }
+  .modal-actions {
+    margin-top: 12px;
+  }
+  .modal-actions button { width: 100%; }
 
+  /* ---------- Tabela de admin -> cards ---------- */
   .users-table,
   .users-table thead,
   .users-table tbody,
@@ -1124,19 +1161,20 @@ footer {
 
   .users-table tr {
     border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 10px;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
     background: #fff;
   }
 
   .users-table td {
     display: grid;
-    grid-template-columns: minmax(92px, .42fr) 1fr;
+    grid-template-columns: 100px 1fr;
     gap: 10px;
     padding: 8px 0;
     border-bottom: 1px solid rgba(220, 229, 224, .7);
     overflow-wrap: anywhere;
+    font-size: 13px;
   }
 
   .users-table td::before {
@@ -1151,25 +1189,34 @@ footer {
   .users-table td:last-child { border-bottom: 0; }
 
   .users-table .row-actions {
+    grid-template-columns: 1fr;
+    gap: 6px;
     white-space: normal;
-    align-items: stretch;
   }
+
+  .users-table .row-actions::before { display: none; }
 
   .row-action {
     width: 100%;
-    margin: 3px 0;
-    min-height: 38px;
+    margin: 0;
+    min-height: 40px;
   }
 
+  /* ---------- Cards de estado (tela 4) ---------- */
+  .state-card {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  /* ---------- Help-page legado ---------- */
   .help-page .app-shell {
     min-height: 100vh;
     height: auto;
   }
-
   .help-page .topbar {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
   }
-
   .help-page .status-pill { max-width: none; }
 }
