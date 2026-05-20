@@ -280,6 +280,139 @@ async function lookupFootball(query, userId) {
   };
 }
 
+// ===================== CLIMA (Open-Meteo - grátis, sem key) =====================
+
+const OPEN_METEO_GEOCODE = 'https://geocoding-api.open-meteo.com/v1/search';
+const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
+
+// Mapeamento simplificado dos códigos WMO para descrições amigáveis em PT-BR
+const WMO_CODES = {
+  0:  '☀️ céu limpo',
+  1:  '🌤️ predominantemente limpo',
+  2:  '⛅ parcialmente nublado',
+  3:  '☁️ nublado',
+  45: '🌫️ neblina',
+  48: '🌫️ neblina com geada',
+  51: '🌦️ garoa leve',
+  53: '🌦️ garoa moderada',
+  55: '🌦️ garoa intensa',
+  61: '🌧️ chuva leve',
+  63: '🌧️ chuva moderada',
+  65: '🌧️ chuva forte',
+  71: '🌨️ neve leve',
+  73: '🌨️ neve moderada',
+  75: '🌨️ neve forte',
+  80: '🌦️ pancadas leves',
+  81: '🌧️ pancadas',
+  82: '⛈️ pancadas fortes',
+  95: '⛈️ trovoada',
+  96: '⛈️ trovoada com granizo',
+  99: '⛈️ trovoada forte com granizo',
+};
+
+function describeWeather(code) {
+  return WMO_CODES[code] || `código ${code}`;
+}
+
+async function geocodeCity(name) {
+  const url = `${OPEN_METEO_GEOCODE}?name=${encodeURIComponent(name)}&count=5&language=pt&format=json`;
+  const json = await fetchJson(url);
+  const results = json?.results || [];
+  if (!results.length) return null;
+  // Prefere resultado com país Brasil se nome bater; senão pega o primeiro
+  const q = normalizeForSearch(name);
+  const sorted = results.slice().sort((a, b) => {
+    const an = normalizeForSearch(a.name);
+    const bn = normalizeForSearch(b.name);
+    const aExact = an === q ? 10 : 0;
+    const bExact = bn === q ? 10 : 0;
+    const aBR = a.country_code === 'BR' ? 5 : 0;
+    const bBR = b.country_code === 'BR' ? 5 : 0;
+    return (bExact + bBR) - (aExact + aBR);
+  });
+  return sorted[0];
+}
+
+async function getWeatherForecast(lat, lon, timezone) {
+  const url = `${OPEN_METEO_FORECAST}?latitude=${lat}&longitude=${lon}`
+    + `&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m`
+    + `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,precipitation_sum`
+    + `&timezone=${encodeURIComponent(timezone || 'auto')}&forecast_days=7`;
+  return await fetchJson(url);
+}
+
+function formatDailyLine(forecast, index, timeZone) {
+  const day = forecast.daily;
+  const dateStr = day.time[index];
+  const date = new Date(dateStr);
+  const weekday = new Intl.DateTimeFormat('pt-BR', { timeZone, weekday: 'short' })
+    .format(date).replace('.', '');
+  const dateFmt = new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: '2-digit' })
+    .format(date);
+  const max = Math.round(day.temperature_2m_max[index]);
+  const min = Math.round(day.temperature_2m_min[index]);
+  const desc = describeWeather(day.weather_code[index]);
+  const rain = day.precipitation_probability_max[index];
+  const rainTxt = rain != null ? `, ${rain}% chuva` : '';
+  return `${weekday} ${dateFmt}: ${min}°-${max}°C ${desc}${rainTxt}`;
+}
+
+async function lookupWeather(query, period) {
+  console.log('[weather] Buscando:', query, 'periodo:', period);
+  if (!query) {
+    return {
+      reply: 'Para consultar o clima, me diga a cidade. Ex: "Como está o tempo em São Paulo?"',
+      pendingAction: null,
+    };
+  }
+
+  const place = await geocodeCity(query);
+  if (!place) {
+    return {
+      reply: `Não encontrei a cidade "${query}". Tente o nome completo (ex: "Rio de Janeiro", "São Paulo", "Lisboa").`,
+      pendingAction: null,
+    };
+  }
+
+  const userTz = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+  const forecast = await getWeatherForecast(place.latitude, place.longitude, place.timezone || userTz);
+  if (!forecast?.daily) {
+    return {
+      reply: `Não consegui buscar a previsão para ${place.name}.`,
+      pendingAction: null,
+    };
+  }
+
+  const cityLabel = place.country_code === 'BR'
+    ? `${place.name}${place.admin1 ? ` (${place.admin1})` : ''}`
+    : `${place.name}, ${place.country}`;
+
+  const lines = [];
+  const cur = forecast.current;
+  if (cur) {
+    lines.push(`Agora: ${Math.round(cur.temperature_2m)}°C, ${describeWeather(cur.weather_code)}, vento ${Math.round(cur.wind_speed_10m)} km/h, umidade ${cur.relative_humidity_2m}%`);
+  }
+
+  const tz = forecast.timezone || userTz;
+  const days = forecast.daily.time.length;
+
+  // Filtra por period se especificado
+  let indicesToShow = [];
+  if (period === 'today') indicesToShow = [0];
+  else if (period === 'tomorrow') indicesToShow = [1];
+  else if (period === 'this_week') indicesToShow = Array.from({ length: Math.min(days, 7) }, (_, i) => i);
+  else indicesToShow = Array.from({ length: Math.min(days, 5) }, (_, i) => i);
+
+  for (const i of indicesToShow) {
+    if (i < days) lines.push(`- ${formatDailyLine(forecast, i, tz)}`);
+  }
+
+  return {
+    reply: `Tempo em *${cityLabel}*:\n${lines.join('\n')}`,
+    pendingAction: null,
+  };
+}
+
 async function searchWikipedia(query) {
   const searchUrl = `https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=1&format=json&origin=*`;
   const searchJson = await fetchJson(searchUrl);
@@ -329,6 +462,7 @@ export async function runLookup(lookup, userId) {
 
   if (lookup.source === 'football') return lookupFootball(query, userId);
   if (lookup.source === 'wiki') return lookupWiki(query);
+  if (lookup.source === 'weather') return lookupWeather(query, lookup.period);
 
   return {
     reply: 'Essa consulta ainda não tem uma fonte externa configurada.',
