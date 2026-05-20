@@ -112,6 +112,12 @@ export async function initDatabase() {
   } catch {
     // Coluna ja existe
   }
+  // Migration: key da API de futebol por usuario (em vez de global)
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN football_api_key TEXT');
+  } catch {
+    // Coluna ja existe
+  }
 
   await ensureUser({
     id: DEFAULT_USER_ID,
@@ -232,16 +238,17 @@ export async function updateUserSettings(userId, settings = {}) {
     calendar_ids: nextCalendarIds,
     assistant_chat_id: settings.assistantChatId ?? settings.assistant_chat_id ?? current.assistant_chat_id,
     self_chat_lid: settings.selfChatLid ?? settings.self_chat_lid ?? current.self_chat_lid,
+    football_api_key: settings.footballApiKey ?? settings.football_api_key ?? current.football_api_key,
     timezone: settings.timezone ?? current.timezone,
   };
 
   await db.run(
     `
       UPDATE users
-      SET name = ?, email = ?, calendar_id = ?, calendar_ids = ?, assistant_chat_id = ?, self_chat_lid = ?, timezone = ?, updated_at = ?
+      SET name = ?, email = ?, calendar_id = ?, calendar_ids = ?, assistant_chat_id = ?, self_chat_lid = ?, football_api_key = ?, timezone = ?, updated_at = ?
       WHERE id = ?
     `,
-    [next.name, next.email, next.calendar_id, next.calendar_ids, next.assistant_chat_id, next.self_chat_lid, next.timezone, nowIso(), id]
+    [next.name, next.email, next.calendar_id, next.calendar_ids, next.assistant_chat_id, next.self_chat_lid, next.football_api_key, next.timezone, nowIso(), id]
   );
 
   return getUser(id);

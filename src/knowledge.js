@@ -1,4 +1,5 @@
 import { getConfig } from './config.js';
+import { getUser } from './database.js';
 
 // Migrado para api-football.com (api-sports.io) — free tier inclui Brasileirão.
 // FOOTBALL_DATA_KEY (nome do env mantido por compat) agora deve ser a key do api-sports.io.
@@ -133,20 +134,22 @@ function normalizeForSearch(s) {
   return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
-function getApiKey() {
-  const key = getConfig().FOOTBALL_DATA_KEY;
-  if (!key) throw new Error('Configure FOOTBALL_DATA_KEY no painel admin com a key do api-sports.io.');
-  return key;
+async function getUserApiKey(userId) {
+  if (!userId) return null;
+  const user = await getUser(userId);
+  return user?.football_api_key || null;
 }
 
-function apiHeaders() {
-  return { 'x-apisports-key': getApiKey() };
+async function apiHeaders(userId) {
+  const key = await getUserApiKey(userId);
+  if (!key) throw new Error('NO_FOOTBALL_KEY');
+  return { 'x-apisports-key': key };
 }
 
 // Busca time via api-sports.io: retorna { team, venue, score } do melhor match
-async function searchTeamByName(query) {
+async function searchTeamByName(query, userId) {
   const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(query)}`;
-  const json = await fetchJson(url, { headers: apiHeaders() });
+  const json = await fetchJson(url, { headers: await apiHeaders(userId) });
   const items = json?.response || []; // [{ team, venue }]
   if (!items.length) return null;
 
@@ -172,9 +175,9 @@ async function searchTeamByName(query) {
 }
 
 // /fixtures?team={id}&next={n} retorna os proximos N jogos
-async function getUpcomingFixtures(teamId, max = 5) {
+async function getUpcomingFixtures(teamId, userId, max = 5) {
   const url = `${FOOTBALL_API_BASE_URL}/fixtures?team=${teamId}&next=${max}`;
-  const json = await fetchJson(url, { headers: apiHeaders() });
+  const json = await fetchJson(url, { headers: await apiHeaders(userId) });
   return json?.response || [];
 }
 
@@ -211,9 +214,30 @@ function fixtureToCalendarEvent(fixture) {
   };
 }
 
-async function lookupFootball(query) {
-  console.log('[football] Buscando time:', query);
-  const found = await searchTeamByName(query);
+async function lookupFootball(query, userId) {
+  console.log('[football] Buscando time:', query, '(user:', userId, ')');
+
+  // Verifica se o usuario configurou a key
+  const userKey = await getUserApiKey(userId);
+  if (!userKey) {
+    return {
+      reply: 'Para consultar jogos, configure sua chave da api-sports.io no painel (Onboarding → Extras → "API de Futebol"). Conta gratuita em https://dashboard.api-football.com/register.',
+      pendingAction: null,
+    };
+  }
+
+  let found;
+  try {
+    found = await searchTeamByName(query, userId);
+  } catch (err) {
+    if (err.message === 'NO_FOOTBALL_KEY') {
+      return {
+        reply: 'Para consultar jogos, configure sua chave da api-sports.io no painel (Extras).',
+        pendingAction: null,
+      };
+    }
+    throw err;
+  }
 
   if (!found?.team?.id) {
     return {
@@ -234,7 +258,7 @@ async function lookupFootball(query) {
   const country = found.team.country ? ` (${found.team.country})` : '';
   console.log('[football] Selecionado:', teamName, country, 'ID:', teamId);
 
-  const fixtures = await getUpcomingFixtures(teamId);
+  const fixtures = await getUpcomingFixtures(teamId, userId);
 
   if (!fixtures.length) {
     return {
@@ -294,7 +318,7 @@ async function lookupWiki(query) {
   };
 }
 
-export async function runLookup(lookup) {
+export async function runLookup(lookup, userId) {
   const query = normalizeQuery(lookup?.query || '');
   if (!query) {
     return {
@@ -303,7 +327,7 @@ export async function runLookup(lookup) {
     };
   }
 
-  if (lookup.source === 'football') return lookupFootball(query);
+  if (lookup.source === 'football') return lookupFootball(query, userId);
   if (lookup.source === 'wiki') return lookupWiki(query);
 
   return {

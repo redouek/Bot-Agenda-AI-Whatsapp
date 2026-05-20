@@ -77,7 +77,7 @@ function parseCookies(cookieHeader = '') {
 
 // ---------- Sessao do usuario (cookie assinado HMAC) ----------
 const USER_COOKIE = 'userSession';
-const USER_SESSION_MS = 120 * 24 * 60 * 60 * 1000; // 120 dias
+const USER_SESSION_MS = 180 * 24 * 60 * 60 * 1000; // 180 dias
 
 function getSessionSecret() {
   // Tenta env var primeiro
@@ -363,6 +363,7 @@ async function handleRequest(req, res, manager) {
       email: user.email,
       assistantChatId: user.assistant_chat_id,
       calendarId: user.calendar_id,
+      footballApiKey: user.football_api_key || '',
       timezone: user.timezone,
     });
   }
@@ -384,7 +385,8 @@ async function handleRequest(req, res, manager) {
       'GOOGLE_API_KEY', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
       'OAUTH_REDIRECT_URI', 'GEMINI_MODEL',
     ]);
-    const userPlatformKeys = ['REMINDER_MINUTES', 'DEFAULT_TIMEZONE', 'FOOTBALL_DATA_KEY'];
+    // FOOTBALL_DATA_KEY agora vai pro user (nao pro global)
+    const userPlatformKeys = ['REMINDER_MINUTES', 'DEFAULT_TIMEZONE'];
     const update = {};
     for (const key of userPlatformKeys) {
       if (body[key] !== undefined && body[key] !== '') update[key] = body[key];
@@ -405,6 +407,7 @@ async function handleRequest(req, res, manager) {
       assistantChatId,
       calendarId: body.GOOGLE_CALENDAR_ID || undefined,
       timezone: update.DEFAULT_TIMEZONE || undefined,
+      footballApiKey: body.FOOTBALL_DATA_KEY !== undefined ? body.FOOTBALL_DATA_KEY : undefined,
     });
 
     if (isPlatformConfigured() && assistantChatId) {

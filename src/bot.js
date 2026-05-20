@@ -578,7 +578,7 @@ export async function processIncomingMessage(userId, client, message) {
 
   if (plan.kind === 'lookup' && plan.lookup) {
     try {
-      const lookupResult = await runLookup(plan.lookup);
+      const lookupResult = await runLookup(plan.lookup, userId);
       if (lookupResult.pendingAction) {
         pendingActions.set(pendingKey, lookupResult.pendingAction);
         const confirmText = await formatPendingActionForConfirmation(lookupResult.pendingAction, userId);

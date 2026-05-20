@@ -709,6 +709,9 @@ async function loadSession() {
     if (session.timezone && form.elements.DEFAULT_TIMEZONE) {
       form.elements.DEFAULT_TIMEZONE.value = session.timezone;
     }
+    if (session.footballApiKey && form.elements.FOOTBALL_DATA_KEY) {
+      form.elements.FOOTBALL_DATA_KEY.value = session.footballApiKey;
+    }
   } catch {
     currentUserId = 'renato';
   }
