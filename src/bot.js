@@ -38,7 +38,17 @@ function detectConfirmation(text = '') {
 }
 
 function formatDateOnly(dateValue, timeZone) {
-  return new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: '2-digit', year: '2-digit' }).format(new Date(dateValue));
+  // Ex: "qui, 25/05/26"
+  const parts = new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+  }).formatToParts(new Date(dateValue));
+  const get = (type) => parts.find(p => p.type === type)?.value || '';
+  const weekday = get('weekday').replace('.', ''); // "qui." -> "qui"
+  return `${weekday}, ${get('day')}/${get('month')}/${get('year')}`;
 }
 
 function formatTimeOnly(dateValue, timeZone) {
@@ -471,6 +481,7 @@ export function startSelfChatPolling(userId, client) {
             timestamp: m.t || 0,
             fromMe: m.id?.fromMe ?? false,
             type: m.type || 'chat',
+            hasMedia: !!(m.mediaData || m.isMedia || (m.type && ['audio', 'ptt', 'image', 'video', 'document', 'sticker'].includes(m.type))),
           })),
         };
       } catch (e) {
@@ -508,12 +519,40 @@ export function startSelfChatPolling(userId, client) {
         if (msgTs <= lastSeenTs) continue;
         if (raw.fromMe && botSentBodies.has(userScopedKey(userId, raw.body))) continue;
 
-        console.log(`[poll:${userId}] Nova mensagem: fromMe=${raw.fromMe} body="${raw.body?.slice(0, 60)}"`);
+        console.log(`[poll:${userId}] Nova mensagem: fromMe=${raw.fromMe} type=${raw.type} hasMedia=${raw.hasMedia} body="${raw.body?.slice(0, 60)}"`);
 
-        // Cria um objeto de mensagem sintético compatível com processIncomingMessage.
-        // getChat() retorna um chat com o CHAT_ID do banco (evita incompatibilidade @lid vs @c.us).
-        // fetchMessages() devolve o histórico já carregado do store.
-        const rawHistory = rawMessages; // closure — lista atual de mensagens do store
+        // Mensagens com mídia (áudio, imagem, video) precisam do downloadMedia funcional.
+        // O objeto sintético não tem isso, então busca o Message real via getMessageById.
+        if (raw.hasMedia) {
+          try {
+            const realMessage = await client.getMessageById(raw.id);
+            if (realMessage) {
+              // Patch getChat para devolver o CHAT_ID do banco (evita o problema @lid vs @c.us)
+              const origGetChat = realMessage.getChat?.bind(realMessage);
+              realMessage.getChat = async () => {
+                try { return await origGetChat?.(); }
+                catch {
+                  return {
+                    id: { _serialized: CHAT_ID },
+                    fetchMessages: async ({ limit = 8 } = {}) =>
+                      rawMessages.slice(-limit).map(m => ({
+                        id: { _serialized: m.id }, fromMe: m.fromMe, body: m.body,
+                        type: m.type || 'chat', hasMedia: !!m.hasMedia,
+                      })),
+                  };
+                }
+              };
+              await processIncomingMessage(userId, client, realMessage);
+              continue;
+            }
+            console.warn(`[poll:${userId}] getMessageById retornou null para ${raw.id}, fazendo fallback`);
+          } catch (err) {
+            console.warn(`[poll:${userId}] getMessageById falhou (${err?.message}), fazendo fallback synthetic`);
+          }
+        }
+
+        // Texto puro (ou fallback se getMessageById falhou): objeto sintético leve.
+        const rawHistory = rawMessages;
         const syntheticMessage = {
           id: { _serialized: raw.id },
           fromMe: raw.fromMe,

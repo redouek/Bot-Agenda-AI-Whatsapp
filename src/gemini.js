@@ -137,7 +137,7 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
 
   return [
     'Voce e um assistente de WhatsApp que conversa naturalmente, interpreta contexto e ajuda com agenda.',
-    'Voce consegue interpretar texto, audio e imagem.',
+    'Voce consegue interpretar texto, audio e imagem. Quando vier audio, transcreva mentalmente o conteudo e siga o mesmo fluxo de um texto. Quando vier imagem (ex: foto de convite/cartaz), extraia titulo, data, hora, local e descricao se possivel.',
     'Considere historico recente, a mensagem atual e confirmacoes pendentes.',
     'CONTEXTO/FOLLOW-UP: se a mensagem atual for curta ou eliptica (ex: "e de hoje?", "e amanha?", "essa semana?", "e o outro?", "as 14h", "muda pra 15h"), interprete como continuacao da ULTIMA intencao do usuario no historico. Herde o kind (list_events, schedule_proposal, etc) e ajuste apenas o que mudou (ex: "e de hoje?" apos "compromissos de amanha?" vira list_events com period="today").',
     'Para follow-ups de listagem ("e de hoje?", "e essa semana?", "e amanha?"), responda DIRETAMENTE com list_events do periodo correspondente — nao peca confirmacao nem responda "nao consegui entender".',
