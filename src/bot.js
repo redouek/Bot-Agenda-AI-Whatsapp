@@ -496,26 +496,50 @@ export async function processIncomingMessage(userId, client, message) {
         .replace(/\b(no|na|do|da|de|o|a|os|as|um|uma)\b/gi, ' ')
         .replace(/\s+/g, ' ').trim();
 
-      let events = await searchEvents(cleanQuery, 60, userId);
-      if (!events.length && cleanQuery !== rawQuery) events = await searchEvents(rawQuery, 60, userId);
-      if (!events.length) {
-        const firstWord = cleanQuery.split(' ')[0];
-        if (firstWord && firstWord !== cleanQuery) events = await searchEvents(firstWord, 60, userId);
-      }
+      const queryNorm = normalizeText(cleanQuery);
+      const matchesQuery = (e) => {
+        if (!queryNorm) return true;
+        const hay = normalizeText([e.summary, e.description, e.location].filter(Boolean).join(' '));
+        return hay.includes(queryNorm);
+      };
 
-      // Filtra por periodo se o Gemini incluiu contexto temporal
-      if (events.length && plan.cancel_event.period) {
+      let events = [];
+
+      // Estrategia 1: se ha period, lista a janela e filtra LOCALMENTE
+      // (mais confiavel que a busca textual do Google que erra com acentos)
+      if (plan.cancel_event.period) {
         const { start: periodStart, end: periodEnd } = getPeriodRange(
           plan.cancel_event.period,
           plan.cancel_event.startDate,
           plan.cancel_event.endDate
         );
-        const startMs = new Date(periodStart).getTime();
-        const endMs = new Date(periodEnd).getTime();
-        events = events.filter(e => {
-          const ts = new Date(e.start?.dateTime || e.start?.date).getTime();
-          return ts >= startMs && ts <= endMs;
-        });
+        const inWindow = await listEvents(periodStart, periodEnd, userId);
+        events = inWindow.filter(matchesQuery);
+      }
+
+      // Estrategia 2: sem period (ou filtro local da janela nao achou nada) — busca textual ampla
+      if (!events.length) {
+        let broad = await searchEvents(cleanQuery, 60, userId);
+        if (!broad.length && cleanQuery !== rawQuery) broad = await searchEvents(rawQuery, 60, userId);
+        if (!broad.length) {
+          const firstWord = cleanQuery.split(' ')[0];
+          if (firstWord && firstWord !== cleanQuery) broad = await searchEvents(firstWord, 60, userId);
+        }
+        // Mesmo no fallback, se period foi pedido, respeita
+        if (broad.length && plan.cancel_event.period) {
+          const { start: periodStart, end: periodEnd } = getPeriodRange(
+            plan.cancel_event.period,
+            plan.cancel_event.startDate,
+            plan.cancel_event.endDate
+          );
+          const startMs = new Date(periodStart).getTime();
+          const endMs = new Date(periodEnd).getTime();
+          broad = broad.filter(e => {
+            const ts = new Date(e.start?.dateTime || e.start?.date).getTime();
+            return ts >= startMs && ts <= endMs;
+          });
+        }
+        events = broad;
       }
 
       if (!events.length) {
