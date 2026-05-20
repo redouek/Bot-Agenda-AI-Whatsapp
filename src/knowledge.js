@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 import { getConfig } from './config.js';
 import { getUser } from './database.js';
 
@@ -112,6 +115,25 @@ async function fetchJson(url, options = {}) {
   }
 }
 
+// fetchJson com retry em 429 (rate limit). Respeita o "Wait N seconds" do response.
+async function fetchJsonWithRetry(url, options = {}, maxRetries = 2) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fetchJson(url, options);
+    } catch (err) {
+      const msg = String(err.message);
+      const m = msg.match(/Wait (\d+) seconds/i);
+      if (m && attempt < maxRetries) {
+        const waitMs = (parseInt(m[1], 10) + 2) * 1000;
+        console.log(`[football] HTTP 429 — aguardando ${waitMs}ms antes do retry`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 function formatDateTime(dateValue) {
   const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
   const date = new Date(dateValue);
@@ -158,41 +180,113 @@ function ptToEnglish(query) {
   return null;
 }
 
-// Cache de times por userKey. O endpoint /teams?search= da football-data.org NAO funciona
+// Cache de times: o endpoint /teams?search= da football-data.org NAO funciona
 // (sempre retorna os 10 primeiros times alfabeticos), entao listamos os times das competicoes
-// do plano do usuario uma vez e fazemos match local.
-const TEAMS_CACHE = new Map(); // userKey -> { teams: [...], expires: ts }
+// do plano do usuario uma vez e fazemos match local. Persistido em disco + memoria.
+const TEAMS_CACHE = new Map();          // userKey -> { teams, expires }
+const TEAMS_LOADING = new Map();        // userKey -> Promise (lock contra load concorrente)
 const TEAMS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const RATE_LIMIT_DELAY_MS = 6500;       // 10 req/min = 6s/req. 6.5s pra ter folga.
 
-async function loadAllTeams(userId) {
-  const userKey = await getUserApiKey(userId);
-  if (!userKey) return [];
-  const cached = TEAMS_CACHE.get(userKey);
-  if (cached && cached.expires > Date.now()) return cached.teams;
+function cacheFilePath(userKey) {
+  const h = crypto.createHash('sha256').update(userKey).digest('hex').slice(0, 16);
+  const dir = process.env.DATA_DIR || './data';
+  return path.resolve(dir, `.football-teams-${h}.json`);
+}
 
-  console.log('[football] Carregando catalogo de times (cache miss)...');
+function loadCacheFromDisk(userKey) {
+  try {
+    const file = cacheFilePath(userKey);
+    if (!fs.existsSync(file)) return null;
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (data.expires > Date.now() && Array.isArray(data.teams) && data.teams.length) {
+      return data;
+    }
+  } catch (err) {
+    console.warn('[football] Falha ao ler cache em disco:', err.message);
+  }
+  return null;
+}
+
+function saveCacheToDisk(userKey, teams) {
+  try {
+    const file = cacheFilePath(userKey);
+    const dir = path.dirname(file);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({
+      teams,
+      expires: Date.now() + TEAMS_CACHE_TTL_MS,
+      savedAt: new Date().toISOString(),
+    }));
+    console.log(`[football] Catalogo persistido em ${file}`);
+  } catch (err) {
+    console.warn('[football] Falha ao salvar cache em disco:', err.message);
+  }
+}
+
+async function fetchTeamsCatalog(userKey) {
+  console.log('[football] Iniciando carregamento do catalogo da football-data.org...');
   const headers = { 'X-Auth-Token': userKey };
-  const compsJson = await fetchJson(`${FOOTBALL_API_BASE_URL}/competitions`, { headers });
+  const compsJson = await fetchJsonWithRetry(`${FOOTBALL_API_BASE_URL}/competitions`, { headers });
   const comps = (compsJson?.competitions || []).filter(c => c.code);
+  console.log(`[football] ${comps.length} competicoes encontradas. Buscando times (~${Math.ceil(comps.length * RATE_LIMIT_DELAY_MS / 1000)}s)...`);
 
   const byId = new Map();
-  for (const comp of comps) {
+  for (let i = 0; i < comps.length; i++) {
+    const comp = comps[i];
     try {
-      const json = await fetchJson(`${FOOTBALL_API_BASE_URL}/competitions/${comp.code}/teams`, { headers });
+      const json = await fetchJsonWithRetry(`${FOOTBALL_API_BASE_URL}/competitions/${comp.code}/teams`, { headers });
+      const before = byId.size;
       for (const t of (json?.teams || [])) {
         if (!byId.has(t.id)) byId.set(t.id, t);
       }
-      // Pequeno delay para respeitar rate limit (10 req/min no Free)
-      await new Promise(r => setTimeout(r, 200));
+      console.log(`[football] ${comp.code} (${comp.name}): +${byId.size - before} times`);
     } catch (err) {
       console.warn(`[football] Falha ao listar ${comp.code}:`, err.message);
+    }
+    if (i < comps.length - 1) {
+      await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY_MS));
     }
   }
 
   const teams = Array.from(byId.values());
-  TEAMS_CACHE.set(userKey, { teams, expires: Date.now() + TEAMS_CACHE_TTL_MS });
-  console.log(`[football] Catalogo carregado: ${teams.length} times (cache valido por 24h)`);
+  console.log(`[football] Catalogo concluido: ${teams.length} times unicos`);
   return teams;
+}
+
+async function loadAllTeams(userId) {
+  const userKey = await getUserApiKey(userId);
+  if (!userKey) return [];
+
+  // 1. Cache em memoria valido
+  const memCached = TEAMS_CACHE.get(userKey);
+  if (memCached && memCached.expires > Date.now()) return memCached.teams;
+
+  // 2. Cache em disco valido
+  const diskCached = loadCacheFromDisk(userKey);
+  if (diskCached) {
+    console.log(`[football] Catalogo carregado do disco: ${diskCached.teams.length} times`);
+    TEAMS_CACHE.set(userKey, diskCached);
+    return diskCached.teams;
+  }
+
+  // 3. Se ja existe load em andamento, espera (evita explosao de rate limit)
+  if (TEAMS_LOADING.has(userKey)) return TEAMS_LOADING.get(userKey);
+
+  // 4. Buscar da API (com lock pra concorrencia)
+  const promise = (async () => {
+    try {
+      const teams = await fetchTeamsCatalog(userKey);
+      const cache = { teams, expires: Date.now() + TEAMS_CACHE_TTL_MS };
+      TEAMS_CACHE.set(userKey, cache);
+      saveCacheToDisk(userKey, teams);
+      return teams;
+    } finally {
+      TEAMS_LOADING.delete(userKey);
+    }
+  })();
+  TEAMS_LOADING.set(userKey, promise);
+  return promise;
 }
 
 // Match local: dada uma query, encontra o melhor time no catalogo cacheado.
@@ -247,7 +341,7 @@ async function getUpcomingFixtures(teamId, userId, max = 5) {
   const today = new Date().toISOString().split('T')[0];
   const until = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const url = `${FOOTBALL_API_BASE_URL}/teams/${teamId}/matches?status=SCHEDULED&dateFrom=${today}&dateTo=${until}&limit=${max}`;
-  const json = await fetchJson(url, { headers: await apiHeaders(userId) });
+  const json = await fetchJsonWithRetry(url, { headers: await apiHeaders(userId) });
   return json?.matches || [];
 }
 
@@ -307,10 +401,15 @@ async function lookupFootball(query, userId) {
         pendingAction: null,
       };
     }
-    // Erro de auth (401) ou outro
     if (String(err.message).includes('HTTP 401') || String(err.message).includes('HTTP 403')) {
       return {
         reply: 'A chave da football-data.org parece invalida ou expirou. Atualize em Onboarding → Extras.',
+        pendingAction: null,
+      };
+    }
+    if (String(err.message).includes('HTTP 429')) {
+      return {
+        reply: 'A football-data.org limitou as requisicoes (plano gratuito = 10/min). Tente novamente em 1 minuto.',
         pendingAction: null,
       };
     }
