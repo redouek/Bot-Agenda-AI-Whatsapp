@@ -7,7 +7,8 @@
       "Bash(npm install:*)",
       "Bash(ls /c/Users/douek/Dropbox/Pessoal/Sites/agenda_IA_whats_DIST/*.json)",
       "Bash(git check-ignore:*)",
-      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --tail=12\")"
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --tail=12\")",
+      "Bash(node --check src/knowledge.js)"
     ]
   }
 }

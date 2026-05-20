@@ -95,6 +95,9 @@ function formatCalendarName(apiName) {
   return name;
 }
 
+// IDs apenas de selecoes nacionais (verificados via competicao FIFA World Cup).
+// Clubes (especialmente brasileiros) sao resolvidos via searchTeamByName porque os
+// IDs podem mudar e a busca textual do football-data.org costuma achar o time certo.
 const KNOWN_TEAM_IDS = {
   'brazil': 764,
   'brasil': 764,
@@ -105,9 +108,9 @@ const KNOWN_TEAM_IDS = {
   'portugal': 765,
   'germany': 759,
   'alemanha': 759,
-  'france': 760,
-  'franca': 760,
-  'frança': 760,
+  'france': 773,
+  'franca': 773,
+  'frança': 773,
   'spain': 760,
   'espanha': 760,
   'england': 770,
@@ -120,21 +123,6 @@ const KNOWN_TEAM_IDS = {
   'croatia': 799,
   'croacia': 799,
   'croácia': 799,
-  'flamengo': 264,
-  'palmeiras': 1783,
-  'corinthians': 1765,
-  'sao paulo': 1766,
-  'são paulo': 1766,
-  'santos': 5981,
-  'gremio': 1777,
-  'grêmio': 1777,
-  'internacional': 119,
-  'atletico mineiro': 1062,
-  'atlético mineiro': 1062,
-  'cruzeiro': 1771,
-  'vasco': 1773,
-  'botafogo': 1769,
-  'fluminense': 1772,
 };
 
 async function fetchJson(url, options = {}) {
@@ -191,13 +179,39 @@ function resolveTeam(query) {
   return null;
 }
 
+function normalizeForSearch(s) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 async function searchTeamByName(query) {
   const key = getConfig().FOOTBALL_DATA_KEY;
   if (!key) throw new Error('Configure FOOTBALL_DATA_KEY no painel de setup.');
 
-  const url = `${FOOTBALL_DATA_BASE_URL}/teams?search=${encodeURIComponent(query)}&limit=5`;
+  const url = `${FOOTBALL_DATA_BASE_URL}/teams?search=${encodeURIComponent(query)}&limit=10`;
   const json = await fetchJson(url, { headers: { 'X-Auth-Token': key } });
-  return json?.teams?.[0] || null;
+  const teams = json?.teams || [];
+  if (!teams.length) return null;
+
+  // Scoring: prefere match exato no nome/shortName/TLA. Penaliza times sem clube real (ex: arenas).
+  const q = normalizeForSearch(query);
+  const scored = teams.map(t => {
+    const name = normalizeForSearch(t.name);
+    const shortName = normalizeForSearch(t.shortName);
+    const tla = normalizeForSearch(t.tla);
+    let score = 0;
+    if (name === q || shortName === q) score += 100;
+    else if (name === `${q} fc` || shortName === `${q} fc`) score += 90;
+    else if (name.startsWith(q) || shortName.startsWith(q)) score += 50;
+    else if (name.includes(q) || shortName.includes(q)) score += 20;
+    if (tla === q.toUpperCase().slice(0, 3).toLowerCase()) score += 30;
+    // Bonus se o time tem founded year (e um clube real, nao uma entidade genérica)
+    if (t.founded) score += 5;
+    return { team: t, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  console.log('[football] search "%s" candidatos:', query, scored.slice(0, 3).map(s => `${s.team.name} (id=${s.team.id} score=${s.score})`));
+  return scored[0]?.team || teams[0];
 }
 
 async function getUpcomingMatches(teamId) {
@@ -217,7 +231,8 @@ function formatMatchLine(match, index) {
   const home = formatHome(match.homeTeam?.name || 'Time da casa');
   const away = formatAway(match.awayTeam?.name || 'Visitante');
   const competition = match.competition?.name ? ` (${match.competition.name})` : '';
-  return `${index + 1}. ${when} - ${home} x ${away}${competition}`;
+  const venue = match.venue ? ` — ${match.venue}` : '';
+  return `${index + 1}. ${when} - ${home} x ${away}${competition}${venue}`;
 }
 
 function matchToCalendarEvent(match) {
@@ -248,7 +263,9 @@ async function lookupFootball(query) {
     const found = await searchTeamByName(query);
     if (found?.id) {
       teamId = found.id;
-      teamName = found.name || query;
+      // Usa o nome completo da API (ex: "São Paulo FC") em vez do query
+      teamName = found.name || found.shortName || query;
+      console.log('[football] Selecionado:', teamName, 'ID:', teamId);
     }
   }
 
@@ -274,7 +291,7 @@ async function lookupFootball(query) {
   const events = matches.map(m => matchToCalendarEvent(m));
 
   return {
-    reply: `Próximos jogos de ${teamName}:\n${lines.join('\n')}\n\nQuer que eu adicione esses eventos na sua agenda?`,
+    reply: `Próximos jogos de *${teamName}*:\n${lines.join('\n')}\n\nQuer que eu adicione esses eventos na sua agenda?`,
     pendingAction: {
       type: 'multiple_events',
       events,
