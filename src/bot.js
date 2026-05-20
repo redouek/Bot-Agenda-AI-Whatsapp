@@ -99,7 +99,7 @@ function formatEventsList(events, timeZone) {
     const start = e.start?.dateTime || e.start?.date;
     const time = e.start?.dateTime ? formatTimeOnly(start, timeZone) : 'dia inteiro';
     const date = formatDateOnly(start, timeZone);
-    return `${i + 1}. ${e.summary} - ${date} ${time}${e.id ? ` (ID:${e.id.slice(-6)})` : ''}`;
+    return `${i + 1}. ${e.summary} - ${date} ${time}`;
   }).join('\n');
 }
 
@@ -216,7 +216,7 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
       const created = await createMultipleEvents(pending.events || [], userId);
       pendingActions.delete(pendingKey);
       if (created.length) {
-        const summary = created.map(item => `- ${item.summary} (ID:${item.id})`).join('\n');
+        const summary = created.map(item => `- ${item.summary}`).join('\n');
         await replyToMessage(userId, client, message, `Eventos agendados com sucesso:\n${summary}`);
         return true;
       }
@@ -227,7 +227,7 @@ async function handlePendingConfirmation(userId, client, message, chatId, decisi
     const created = await createEvent(pending.event, userId);
     pendingActions.delete(pendingKey);
     if (created?.id) {
-      await replyToMessage(userId, client, message, `Evento agendado com sucesso: ${pending.event.summary}. ID:${created.id}`);
+      await replyToMessage(userId, client, message, `Evento agendado com sucesso: ${pending.event.summary}.`);
       return true;
     }
     await replyToMessage(userId, client, message, 'Nao consegui criar o evento no Google Calendar.');
