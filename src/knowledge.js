@@ -147,14 +147,46 @@ async function apiHeaders(userId) {
   return { 'X-Auth-Token': key };
 }
 
+// Inverte NATIONAL_TEAMS pra lookup PT->EN. football-data.org indexa em ingles.
+function ptToEnglish(query) {
+  const q = normalizeForSearch(query);
+  for (const [enName, { pt }] of Object.entries(NATIONAL_TEAMS)) {
+    if (normalizeForSearch(pt) === q || normalizeForSearch(enName) === q) {
+      return enName;
+    }
+  }
+  return null;
+}
+
+// Gera variantes pra tentar (query original + traducao PT->EN se aplicavel)
+function buildQueryVariants(query) {
+  const variants = [query];
+  const en = ptToEnglish(query);
+  if (en && !variants.includes(en)) variants.push(en);
+  return variants;
+}
+
 // Busca time via football-data.org: retorna { team, score } do melhor match
 async function searchTeamByName(query, userId) {
-  const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(query)}&limit=10`;
-  const json = await fetchJson(url, { headers: await apiHeaders(userId) });
-  const teams = json?.teams || [];
+  const variants = buildQueryVariants(query);
+  const headers = await apiHeaders(userId);
+
+  let teams = [];
+  let usedQuery = '';
+  for (const variant of variants) {
+    const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(variant)}&limit=10`;
+    const json = await fetchJson(url, { headers });
+    if (json?.teams?.length) {
+      teams = json.teams;
+      usedQuery = variant;
+      break;
+    }
+  }
+
   if (!teams.length) return null;
 
-  const q = normalizeForSearch(query);
+  // Score: usa a query (em ingles se houve traducao) pra match
+  const q = normalizeForSearch(usedQuery);
   const scored = teams.map(t => {
     const name = normalizeForSearch(t.name);
     const shortName = normalizeForSearch(t.shortName);
@@ -172,7 +204,7 @@ async function searchTeamByName(query, userId) {
   });
 
   scored.sort((a, b) => b.score - a.score);
-  console.log(`[football] search "${query}" -> top:`, scored.slice(0, 3).map(s => `${s.team.name} (id=${s.team.id}, score=${s.score})`));
+  console.log(`[football] search "${query}" (api: "${usedQuery}") -> top:`, scored.slice(0, 3).map(s => `${s.team.name} (id=${s.team.id}, score=${s.score})`));
   return scored[0] || null;
 }
 
