@@ -158,54 +158,88 @@ function ptToEnglish(query) {
   return null;
 }
 
-// Gera variantes pra tentar (query original + traducao PT->EN se aplicavel)
-function buildQueryVariants(query) {
-  const variants = [query];
-  const en = ptToEnglish(query);
-  if (en && !variants.includes(en)) variants.push(en);
-  return variants;
-}
+// Cache de times por userKey. O endpoint /teams?search= da football-data.org NAO funciona
+// (sempre retorna os 10 primeiros times alfabeticos), entao listamos os times das competicoes
+// do plano do usuario uma vez e fazemos match local.
+const TEAMS_CACHE = new Map(); // userKey -> { teams: [...], expires: ts }
+const TEAMS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Busca time via football-data.org: retorna { team, score } do melhor match
-async function searchTeamByName(query, userId) {
-  const variants = buildQueryVariants(query);
-  const headers = await apiHeaders(userId);
+async function loadAllTeams(userId) {
+  const userKey = await getUserApiKey(userId);
+  if (!userKey) return [];
+  const cached = TEAMS_CACHE.get(userKey);
+  if (cached && cached.expires > Date.now()) return cached.teams;
 
-  let teams = [];
-  let usedQuery = '';
-  for (const variant of variants) {
-    const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(variant)}&limit=10`;
-    const json = await fetchJson(url, { headers });
-    if (json?.teams?.length) {
-      teams = json.teams;
-      usedQuery = variant;
-      break;
+  console.log('[football] Carregando catalogo de times (cache miss)...');
+  const headers = { 'X-Auth-Token': userKey };
+  const compsJson = await fetchJson(`${FOOTBALL_API_BASE_URL}/competitions`, { headers });
+  const comps = (compsJson?.competitions || []).filter(c => c.code);
+
+  const byId = new Map();
+  for (const comp of comps) {
+    try {
+      const json = await fetchJson(`${FOOTBALL_API_BASE_URL}/competitions/${comp.code}/teams`, { headers });
+      for (const t of (json?.teams || [])) {
+        if (!byId.has(t.id)) byId.set(t.id, t);
+      }
+      // Pequeno delay para respeitar rate limit (10 req/min no Free)
+      await new Promise(r => setTimeout(r, 200));
+    } catch (err) {
+      console.warn(`[football] Falha ao listar ${comp.code}:`, err.message);
     }
   }
 
+  const teams = Array.from(byId.values());
+  TEAMS_CACHE.set(userKey, { teams, expires: Date.now() + TEAMS_CACHE_TTL_MS });
+  console.log(`[football] Catalogo carregado: ${teams.length} times (cache valido por 24h)`);
+  return teams;
+}
+
+// Match local: dada uma query, encontra o melhor time no catalogo cacheado.
+async function searchTeamByName(query, userId) {
+  const teams = await loadAllTeams(userId);
   if (!teams.length) return null;
 
-  // Score: usa a query (em ingles se houve traducao) pra match
-  const q = normalizeForSearch(usedQuery);
-  const scored = teams.map(t => {
-    const name = normalizeForSearch(t.name);
-    const shortName = normalizeForSearch(t.shortName);
-    const tla = normalizeForSearch(t.tla);
-    let score = 0;
-    if (name === q || shortName === q) score += 100;
-    else if (name === `${q} fc` || shortName === `${q} fc`) score += 90;
-    else if (`${name} fc` === q || `${shortName} fc` === q) score += 90;
-    else if (name.startsWith(q) || shortName.startsWith(q)) score += 50;
-    else if (q.startsWith(name) || q.startsWith(shortName)) score += 40;
-    else if (name.includes(q) || shortName.includes(q)) score += 20;
-    if (tla && tla === q.slice(0, 3)) score += 30;
-    if (t.founded) score += 5;
-    return { team: t, score };
-  });
+  // Tenta com a query original e tambem com traducao PT->EN
+  const variants = [query];
+  const en = ptToEnglish(query);
+  if (en && !variants.includes(en)) variants.push(en);
 
-  scored.sort((a, b) => b.score - a.score);
-  console.log(`[football] search "${query}" (api: "${usedQuery}") -> top:`, scored.slice(0, 3).map(s => `${s.team.name} (id=${s.team.id}, score=${s.score})`));
-  return scored[0] || null;
+  let bestScore = -1;
+  let bestTeam = null;
+  let bestVariant = '';
+
+  for (const variant of variants) {
+    const q = normalizeForSearch(variant);
+    for (const t of teams) {
+      const name = normalizeForSearch(t.name);
+      const shortName = normalizeForSearch(t.shortName);
+      const tla = normalizeForSearch(t.tla);
+      let score = 0;
+      if (name === q || shortName === q) score += 100;
+      else if (name === `${q} fc` || shortName === `${q} fc`) score += 90;
+      else if (`${name} fc` === q || `${shortName} fc` === q) score += 90;
+      else if (name === `${q} sc` || name === `${q} ec` || name === `${q} ac`) score += 85;
+      else if (name.startsWith(q) || shortName.startsWith(q)) score += 50;
+      else if (q.startsWith(name) || q.startsWith(shortName)) score += 40;
+      else if (name.includes(q) || shortName.includes(q)) score += 20;
+      if (tla && tla === q.slice(0, 3)) score += 30;
+      if (score > bestScore) {
+        bestScore = score;
+        bestTeam = t;
+        bestVariant = variant;
+      }
+    }
+    if (bestScore >= 90) break; // ja achou match excelente, nao precisa tentar outras variantes
+  }
+
+  if (!bestTeam || bestScore < 15) {
+    console.log(`[football] search "${query}" -> sem match (best score: ${bestScore})`);
+    return null;
+  }
+
+  console.log(`[football] search "${query}" (variant: "${bestVariant}") -> ${bestTeam.name} (id=${bestTeam.id}, score=${bestScore})`);
+  return { team: bestTeam, score: bestScore };
 }
 
 // /teams/{id}/matches?status=SCHEDULED&dateFrom&dateTo
@@ -284,21 +318,8 @@ async function lookupFootball(query, userId) {
   }
 
   if (!found?.team?.id) {
-    if (looksBrazilian(query)) {
-      return {
-        reply: `Não encontrei "${query}". O plano gratuito da football-data.org cobre principais ligas europeias (Premier League, La Liga, Bundesliga, Serie A, Ligue 1), Champions League, Copa do Mundo e Copa América — mas NÃO cobre Brasileirão. Pra times brasileiros precisaria do plano Tier Two (pago).`,
-        pendingAction: null,
-      };
-    }
     return {
-      reply: `Não encontrei o time "${query}". Tente o nome oficial em inglês (ex: "Real Madrid", "Manchester City", "Bayern", "Brazil").`,
-      pendingAction: null,
-    };
-  }
-
-  if (found.score < 15) {
-    return {
-      reply: `Não encontrei nenhum time chamado "${query}" com confiança suficiente. Tente o nome oficial (ex: "Real Madrid", "Bayern Munich").`,
+      reply: `Não encontrei o time "${query}". Tente o nome oficial (ex: "São Paulo", "Flamengo", "Real Madrid", "Bayern Munich", "Brasil"). Cobertura inclui Brasileirão, Libertadores, Champions League, Copa do Mundo e principais ligas europeias.`,
       pendingAction: null,
     };
   }
