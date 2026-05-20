@@ -56,6 +56,21 @@ a:hover { text-decoration: underline; }
   gap: 22px;
 }
 
+/* Variante compacta usada no /admin: so logo + botao Onboarding no topo */
+.app-shell:has(.brand-panel--compact) {
+  grid-template-columns: minmax(180px, 200px) 1fr;
+}
+.brand-panel--compact {
+  padding: 18px;
+  justify-content: flex-start;
+}
+.brand-panel--compact .brand-header {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 0;
+}
+
 .brand-mark {
   width: 40px;
   height: 40px;
