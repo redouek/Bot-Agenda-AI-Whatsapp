@@ -1,6 +1,8 @@
 import { getConfig } from './config.js';
 
-const FOOTBALL_DATA_BASE_URL = 'https://api.football-data.org/v4';
+// Migrado para api-football.com (api-sports.io) — free tier inclui Brasileirão.
+// FOOTBALL_DATA_KEY (nome do env mantido por compat) agora deve ser a key do api-sports.io.
+const FOOTBALL_API_BASE_URL = 'https://v3.football.api-sports.io';
 
 // Mapa: nome exato da API (inglês) → { pt: nome em português, flag: emoji }
 const NATIONAL_TEAMS = {
@@ -90,41 +92,6 @@ function formatAway(apiName) {
   return flag ? `${name} ${flag}` : name;
 }
 
-function formatCalendarName(apiName) {
-  const { name } = resolveApiTeamName(apiName);
-  return name;
-}
-
-// IDs apenas de selecoes nacionais (verificados via competicao FIFA World Cup).
-// Clubes (especialmente brasileiros) sao resolvidos via searchTeamByName porque os
-// IDs podem mudar e a busca textual do football-data.org costuma achar o time certo.
-const KNOWN_TEAM_IDS = {
-  'brazil': 764,
-  'brasil': 764,
-  'selecao brasileira': 764,
-  'seleção brasileira': 764,
-  'selecao do brasil': 764,
-  'argentina': 762,
-  'portugal': 765,
-  'germany': 759,
-  'alemanha': 759,
-  'france': 773,
-  'franca': 773,
-  'frança': 773,
-  'spain': 760,
-  'espanha': 760,
-  'england': 770,
-  'inglaterra': 770,
-  'italy': 784,
-  'italia': 784,
-  'itália': 784,
-  'netherlands': 779,
-  'holanda': 779,
-  'croatia': 799,
-  'croacia': 799,
-  'croácia': 799,
-};
-
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -162,85 +129,76 @@ function normalizeQuery(query = '') {
   return query.trim();
 }
 
-function resolveTeam(query) {
-  const lower = query.trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-  for (const [key, id] of Object.entries(KNOWN_TEAM_IDS)) {
-    const normKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (normKey === lower) return { id, name: key };
-  }
-
-  for (const [key, id] of Object.entries(KNOWN_TEAM_IDS)) {
-    const normKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    if (normKey.includes(lower) || lower.includes(normKey)) return { id, name: key };
-  }
-
-  return null;
-}
-
 function normalizeForSearch(s) {
   return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
-async function searchTeamByName(query) {
+function getApiKey() {
   const key = getConfig().FOOTBALL_DATA_KEY;
-  if (!key) throw new Error('Configure FOOTBALL_DATA_KEY no painel de setup.');
+  if (!key) throw new Error('Configure FOOTBALL_DATA_KEY no painel admin com a key do api-sports.io.');
+  return key;
+}
 
-  const url = `${FOOTBALL_DATA_BASE_URL}/teams?search=${encodeURIComponent(query)}&limit=10`;
-  const json = await fetchJson(url, { headers: { 'X-Auth-Token': key } });
-  const teams = json?.teams || [];
-  if (!teams.length) return null;
+function apiHeaders() {
+  return { 'x-apisports-key': getApiKey() };
+}
 
-  // Scoring: prefere match exato no nome/shortName/TLA. Penaliza times sem clube real (ex: arenas).
+// Busca time via api-sports.io: retorna { team, venue, score } do melhor match
+async function searchTeamByName(query) {
+  const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(query)}`;
+  const json = await fetchJson(url, { headers: apiHeaders() });
+  const items = json?.response || []; // [{ team, venue }]
+  if (!items.length) return null;
+
   const q = normalizeForSearch(query);
-  const scored = teams.map(t => {
+  const scored = items.map(item => {
+    const t = item.team || {};
     const name = normalizeForSearch(t.name);
-    const shortName = normalizeForSearch(t.shortName);
-    const tla = normalizeForSearch(t.tla);
+    const code = normalizeForSearch(t.code);
     let score = 0;
-    if (name === q || shortName === q) score += 100;
-    else if (name === `${q} fc` || shortName === `${q} fc`) score += 90;
-    else if (name.startsWith(q) || shortName.startsWith(q)) score += 50;
-    else if (name.includes(q) || shortName.includes(q)) score += 20;
-    if (tla === q.toUpperCase().slice(0, 3).toLowerCase()) score += 30;
-    // Bonus se o time tem founded year (e um clube real, nao uma entidade genérica)
-    if (t.founded) score += 5;
-    return { team: t, score };
+    if (name === q) score += 100;
+    else if (name === `${q} fc` || name === `${q} sc` || name === `${q} ec`) score += 90;
+    else if (name.startsWith(q)) score += 50;
+    else if (name.includes(q)) score += 20;
+    if (code && code === q.slice(0, 3)) score += 30;
+    if (t.founded) score += 5;          // ano de fundacao = clube real
+    if (t.national) score -= 10;        // ao buscar clube, penaliza selecao
+    return { team: t, venue: item.venue, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
-  console.log('[football] search "%s" candidatos:', query, scored.slice(0, 3).map(s => `${s.team.name} (id=${s.team.id} score=${s.score})`));
-  return scored[0]?.team || teams[0];
+  console.log('[football] search "%s" -> top:', query, scored.slice(0, 3).map(s => `${s.team.name} (${s.team.country}, id=${s.team.id}, score=${s.score})`));
+  return scored[0] || null;
 }
 
-async function getUpcomingMatches(teamId) {
-  const key = getConfig().FOOTBALL_DATA_KEY;
-  if (!key) throw new Error('Configure FOOTBALL_DATA_KEY no painel de setup.');
-
-  const today = new Date().toISOString().split('T')[0];
-  const until = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-  const url = `${FOOTBALL_DATA_BASE_URL}/teams/${teamId}/matches?status=SCHEDULED&dateFrom=${today}&dateTo=${until}&limit=5`;
-  const json = await fetchJson(url, { headers: { 'X-Auth-Token': key } });
-  return json?.matches || [];
+// /fixtures?team={id}&next={n} retorna os proximos N jogos
+async function getUpcomingFixtures(teamId, max = 5) {
+  const url = `${FOOTBALL_API_BASE_URL}/fixtures?team=${teamId}&next=${max}`;
+  const json = await fetchJson(url, { headers: apiHeaders() });
+  return json?.response || [];
 }
 
-function formatMatchLine(match, index) {
-  const when = formatDateTime(match.utcDate);
-  const home = formatHome(match.homeTeam?.name || 'Time da casa');
-  const away = formatAway(match.awayTeam?.name || 'Visitante');
-  const competition = match.competition?.name ? ` (${match.competition.name})` : '';
-  const venue = match.venue ? ` — ${match.venue}` : '';
+function formatFixtureLine(fixture, index) {
+  const f = fixture.fixture || {};
+  const teams = fixture.teams || {};
+  const league = fixture.league || {};
+  const when = formatDateTime(f.date);
+  const home = formatHome(teams.home?.name || 'Time da casa');
+  const away = formatAway(teams.away?.name || 'Visitante');
+  const competition = league.name ? ` (${league.name})` : '';
+  const venue = f.venue?.name ? ` — ${f.venue.name}${f.venue.city ? `/${f.venue.city}` : ''}` : '';
   return `${index + 1}. ${when} - ${home} x ${away}${competition}${venue}`;
 }
 
-function matchToCalendarEvent(match) {
-  const startDate = new Date(match.utcDate);
+function fixtureToCalendarEvent(fixture) {
+  const f = fixture.fixture || {};
+  const teams = fixture.teams || {};
+  const league = fixture.league || {};
+  const startDate = new Date(f.date);
   const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000);
-  const home = formatHome(match.homeTeam?.name || 'Time da casa');
-  const away = formatAway(match.awayTeam?.name || 'Visitante');
-  const competition = match.competition?.name || '';
+  const home = formatHome(teams.home?.name || 'Time da casa');
+  const away = formatAway(teams.away?.name || 'Visitante');
+  const competition = league.name || '';
   const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
 
   return {
@@ -248,50 +206,48 @@ function matchToCalendarEvent(match) {
     description: competition,
     startDateTime: startDate.toISOString(),
     endDateTime: endDate.toISOString(),
-    location: match.venue || '',
+    location: f.venue?.name ? `${f.venue.name}${f.venue.city ? ` - ${f.venue.city}` : ''}` : '',
     timeZone,
   };
 }
 
 async function lookupFootball(query) {
-  const known = resolveTeam(query);
-  let teamId = known?.id;
-  let teamName = known?.name || query;
+  console.log('[football] Buscando time:', query);
+  const found = await searchTeamByName(query);
 
-  if (!teamId) {
-    console.log('[football] Time não encontrado no mapa, buscando na API:', query);
-    const found = await searchTeamByName(query);
-    if (found?.id) {
-      teamId = found.id;
-      // Usa o nome completo da API (ex: "São Paulo FC") em vez do query
-      teamName = found.name || found.shortName || query;
-      console.log('[football] Selecionado:', teamName, 'ID:', teamId);
-    }
-  }
-
-  if (!teamId) {
+  if (!found?.team?.id) {
     return {
-      reply: `Não encontrei o time "${query}". Tente usar o nome em português ou inglês (ex: "Flamengo", "Brazil", "Palmeiras").`,
+      reply: `Não encontrei o time "${query}". Tente o nome oficial (ex: "Sao Paulo", "Flamengo", "Real Madrid", "Manchester City").`,
       pendingAction: null,
     };
   }
 
-  console.log('[football] Buscando jogos para:', teamName, 'ID:', teamId);
-
-  const matches = await getUpcomingMatches(teamId);
-
-  if (!matches.length) {
+  if (found.score < 20) {
     return {
-      reply: `Não encontrei próximos jogos agendados para ${teamName}. Pode ser que os jogos ainda não estejam publicados na base de dados.`,
+      reply: `Não encontrei nenhum time chamado "${query}" com confiança suficiente. Tente especificar mais (ex: "Sao Paulo FC", "Atletico MG").`,
       pendingAction: null,
     };
   }
 
-  const lines = matches.map((m, i) => formatMatchLine(m, i));
-  const events = matches.map(m => matchToCalendarEvent(m));
+  const teamId = found.team.id;
+  const teamName = found.team.name || query;
+  const country = found.team.country ? ` (${found.team.country})` : '';
+  console.log('[football] Selecionado:', teamName, country, 'ID:', teamId);
+
+  const fixtures = await getUpcomingFixtures(teamId);
+
+  if (!fixtures.length) {
+    return {
+      reply: `Não encontrei próximos jogos agendados para ${teamName}${country}. Pode ser que ainda não estejam publicados.`,
+      pendingAction: null,
+    };
+  }
+
+  const lines = fixtures.map((m, i) => formatFixtureLine(m, i));
+  const events = fixtures.map(m => fixtureToCalendarEvent(m));
 
   return {
-    reply: `Próximos jogos de *${teamName}*:\n${lines.join('\n')}\n\nQuer que eu adicione esses eventos na sua agenda?`,
+    reply: `Próximos jogos de *${teamName}*${country}:\n${lines.join('\n')}\n\nQuer que eu adicione esses eventos na sua agenda?`,
     pendingAction: {
       type: 'multiple_events',
       events,
