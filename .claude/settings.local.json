@@ -8,7 +8,25 @@
       "Bash(ls /c/Users/douek/Dropbox/Pessoal/Sites/agenda_IA_whats_DIST/*.json)",
       "Bash(git check-ignore:*)",
       "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --tail=12\")",
-      "Bash(node --check src/knowledge.js)"
+      "Bash(node --check src/knowledge.js)",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --tail=50 | grep -E 'football|Plano Gemini|cancel|lookup|FOOTBALL'\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --tail=200 | grep -iE 'football|sao paulo|douek|lookup' | tail -30\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --since 30m | grep -E 'douek|football|Mensagem|Plano|Erro' | tail -40\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --since 30m | tail -80\")",
+      "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-check-key.mjs\" agenda-server:/tmp/checkkey.mjs)",
+      "PowerShell(ssh agenda-server \"docker cp /tmp/checkkey.mjs agenda-ai-whatsapp-bot-1:/tmp/checkkey.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/checkkey.mjs\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --tail=400 | grep -v 'QR code gerado' | tail -60\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --since 1h --no-color 2>&1 | grep -c 'QR code gerado'\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --since 1h --no-color 2>&1 | grep -vE 'QR code gerado' | tail -100\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && timeout 45 docker compose logs bot -f --since 30s 2>&1 | grep -vE 'QR code gerado' | head -100\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --since 5m --no-color | grep -vE 'QR code gerado'\")",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --since 5m\")",
+      "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-status.mjs\" agenda-server:/tmp/status.mjs)",
+      "PowerShell(ssh agenda-server \"docker cp /tmp/status.mjs agenda-ai-whatsapp-bot-1:/tmp/status.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/status.mjs\")",
+      "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-test-api.mjs\" agenda-server:/tmp/testapi.mjs)",
+      "PowerShell(ssh agenda-server \"docker cp /tmp/testapi.mjs agenda-ai-whatsapp-bot-1:/tmp/testapi.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/testapi.mjs\")",
+      "PowerShell(scp \"c:\\\\Users\\\\douek\\\\Dropbox\\\\Pessoal\\\\Sites\\\\agenda_IA_whats_DIST\\\\.tmp-test-variants.mjs\" agenda-server:/tmp/variants.mjs)",
+      "PowerShell(ssh agenda-server \"docker cp /tmp/variants.mjs agenda-ai-whatsapp-bot-1:/tmp/variants.mjs && docker compose -f /home/douek/docker/agenda-ai-whatsapp/docker-compose.yml exec -T bot node /tmp/variants.mjs\")"
     ]
   }
 }

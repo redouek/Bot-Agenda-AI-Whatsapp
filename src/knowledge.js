@@ -146,13 +146,53 @@ async function apiHeaders(userId) {
   return { 'x-apisports-key': key };
 }
 
+// Sanitiza query para api-sports.io: API aceita SO alfanumerico e espaco.
+// Remove acentos, pontuacao e caracteres especiais.
+function sanitizeApiQuery(query) {
+  return String(query || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // tira acentos
+    .replace(/[^a-zA-Z0-9 ]/g, ' ')              // tira pontuacao
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Gera variantes para tentar: query original sanitizada + sem sufixo de clube (FC/SC/EC)
+function buildSearchVariants(query) {
+  const base = sanitizeApiQuery(query);
+  if (!base) return [];
+  const variants = [base];
+  // Sufixos comuns de clube que a api-sports as vezes nao aceita junto do nome
+  const suffixMatch = base.match(/^(.+?)\s+(FC|SC|EC|AC|CF)$/i);
+  if (suffixMatch) variants.push(suffixMatch[1]);
+  const prefixMatch = base.match(/^(FC|AC|SC|EC)\s+(.+)$/i);
+  if (prefixMatch) variants.push(prefixMatch[2]);
+  return variants;
+}
+
 // Busca time via api-sports.io: retorna { team, venue, score } do melhor match
 async function searchTeamByName(query, userId) {
-  const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(query)}`;
-  const json = await fetchJson(url, { headers: await apiHeaders(userId) });
-  const items = json?.response || []; // [{ team, venue }]
+  const variants = buildSearchVariants(query);
+  if (!variants.length) return null;
+  const headers = await apiHeaders(userId);
+
+  let items = [];
+  let usedVariant = '';
+  for (const variant of variants) {
+    const url = `${FOOTBALL_API_BASE_URL}/teams?search=${encodeURIComponent(variant)}`;
+    const json = await fetchJson(url, { headers });
+    if (json?.errors?.search) {
+      console.warn(`[football] API rejeitou "${variant}":`, json.errors.search);
+      continue;
+    }
+    if (json?.response?.length) {
+      items = json.response;
+      usedVariant = variant;
+      break;
+    }
+  }
+
   if (!items.length) return null;
 
+  // Score: prefere match exato. Usa query ORIGINAL normalizada (com acento removido) pro scoring
   const q = normalizeForSearch(query);
   const scored = items.map(item => {
     const t = item.team || {};
@@ -161,16 +201,18 @@ async function searchTeamByName(query, userId) {
     let score = 0;
     if (name === q) score += 100;
     else if (name === `${q} fc` || name === `${q} sc` || name === `${q} ec`) score += 90;
+    else if (`${name} fc` === q || `${name} sc` === q || `${name} ec` === q) score += 90; // query veio com FC, time sem
     else if (name.startsWith(q)) score += 50;
+    else if (q.startsWith(name)) score += 40;
     else if (name.includes(q)) score += 20;
     if (code && code === q.slice(0, 3)) score += 30;
-    if (t.founded) score += 5;          // ano de fundacao = clube real
-    if (t.national) score -= 10;        // ao buscar clube, penaliza selecao
+    if (t.founded) score += 5;
+    if (t.national) score -= 10;
     return { team: t, venue: item.venue, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
-  console.log('[football] search "%s" -> top:', query, scored.slice(0, 3).map(s => `${s.team.name} (${s.team.country}, id=${s.team.id}, score=${s.score})`));
+  console.log(`[football] search "${query}" (api: "${usedVariant}") -> top:`, scored.slice(0, 3).map(s => `${s.team.name} (${s.team.country}, id=${s.team.id}, score=${s.score})`));
   return scored[0] || null;
 }
 
@@ -246,9 +288,9 @@ async function lookupFootball(query, userId) {
     };
   }
 
-  if (found.score < 20) {
+  if (found.score < 15) {
     return {
-      reply: `Não encontrei nenhum time chamado "${query}" com confiança suficiente. Tente especificar mais (ex: "Sao Paulo FC", "Atletico MG").`,
+      reply: `Não encontrei nenhum time chamado "${query}" com confiança suficiente. Tente especificar mais (ex: "Sao Paulo", "Atletico Mineiro").`,
       pendingAction: null,
     };
   }
