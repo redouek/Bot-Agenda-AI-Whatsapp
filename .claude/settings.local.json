@@ -6,7 +6,8 @@
       "Bash(node -e \"import\\(''qrcode''\\).then\\(m => console.log\\(''qrcode ok''\\)\\).catch\\(\\(\\) => console.log\\(''qrcode NOT installed''\\)\\)\")",
       "Bash(npm install:*)",
       "Bash(ls /c/Users/douek/Dropbox/Pessoal/Sites/agenda_IA_whats_DIST/*.json)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "PowerShell(ssh agenda-server \"cd /home/douek/docker/agenda-ai-whatsapp && docker compose logs bot --tail=12\")"
     ]
   }
 }

@@ -40,6 +40,12 @@ function detectConfirmation(text = '') {
   return null;
 }
 
+// Detecta resposta puramente numerica (selecao de item de uma lista oferecida pelo bot)
+function detectNumericChoice(text = '') {
+  const m = String(text).trim().match(/^(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 // Pega nome amigavel das agendas (cache simples em memoria por userId)
 const calendarNamesCache = new Map();
 async function getCalendarNameMap(userId) {
@@ -155,6 +161,17 @@ function getDayKey(dateValue, timeZone) {
   }).formatToParts(new Date(dateValue));
   const get = (type) => parts.find(p => p.type === type)?.value || '';
   return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+// Lista numerada por evento (nao agrupada por dia) — usada quando precisa de selecao por numero
+function formatNumberedEvents(events, timeZone) {
+  return events.map((e, i) => {
+    const start = e.start?.dateTime || e.start?.date;
+    const weekday = formatLongWeekday(start, timeZone);
+    const date = formatShortDate(start, timeZone);
+    const time = e.start?.dateTime ? formatTimeOnly(start, timeZone) : 'dia inteiro';
+    return `${i + 1}. ${e.summary} — ${weekday} ${date} ${time}`;
+  }).join('\n');
 }
 
 function formatEventsList(events, timeZone) {
@@ -367,6 +384,35 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
   }
 }
 
+// Processa selecao numerica quando ha uma lista pendente (ex: "Encontrei 2 eventos. Responda 1 ou 2")
+async function handlePendingChoice(userId, client, message, chatId, index) {
+  const pendingKey = userScopedKey(userId, chatId);
+  const pending = pendingActions.get(pendingKey);
+  if (!pending || pending.type !== 'choice') return false;
+
+  const choice = pending.choices?.[index - 1];
+  if (!choice) {
+    await replyToMessage(userId, client, message, `Numero ${index} fora do intervalo. Tente entre 1 e ${pending.choices?.length || 0}.`);
+    return true;
+  }
+
+  if (pending.action === 'cancel') {
+    // Promove para um cancel_event pendente de confirmacao "sim/nao"
+    const timeZone = getTimeZone();
+    const next = { type: 'cancel_event', eventId: choice.eventId, calendarId: choice.calendarId, summary: choice.summary, createdAt: Date.now() };
+    pendingActions.set(pendingKey, next);
+    const start = choice.start;
+    const timeStr = start && start.includes('T') ? formatTimeOnly(start, timeZone) : '';
+    await replyToMessage(
+      userId, client, message,
+      `Quer cancelar "${choice.summary}" (${formatDateOnly(start, timeZone)}${timeStr ? ' ' + timeStr : ''})?\nResponda "sim" para confirmar ou "nao" para cancelar.`
+    );
+    return true;
+  }
+
+  return false;
+}
+
 export async function processIncomingMessage(userId, client, message) {
   // Verifica self-chat ANTES do dedup (evita adicionar ID e bloquear polling depois)
   let chat;
@@ -403,6 +449,10 @@ export async function processIncomingMessage(userId, client, message) {
   const body = message.body || '';
   console.log(`[bot:${userId}] Mensagem recebida:`, { chatId, body: body.slice(0, 80) });
 
+  // Se ha uma lista pendente de escolha e o user respondeu so um numero, processa selecao
+  const choiceIdx = detectNumericChoice(body);
+  if (choiceIdx && await handlePendingChoice(userId, client, message, chatId, choiceIdx)) return;
+
   const confirmation = detectConfirmation(body);
   if (confirmation && await handlePendingConfirmation(userId, client, message, chatId, confirmation)) return;
 
@@ -438,9 +488,12 @@ export async function processIncomingMessage(userId, client, message) {
   if (plan.kind === 'cancel_event' && plan.cancel_event?.query) {
     try {
       const rawQuery = plan.cancel_event.query;
+      // Tira data/hora que o Gemini possa ter colocado no query indevidamente (defensivo)
       const cleanQuery = rawQuery
-        .replace(/\b(no|na|do|da|de|o|a|os|as|um|uma)\b/gi, ' ')
+        .replace(/\b\d{1,2}[\/-]\d{1,2}([\/-]\d{2,4})?\b/g, ' ')   // datas
+        .replace(/\b\d{1,2}:\d{2}h?\b/g, ' ')                       // horas
         .replace(/\b(sabado|domingo|segunda|terca|quarta|quinta|sexta|hoje|amanha|semana|mes|proximo|proxima)\b/gi, ' ')
+        .replace(/\b(no|na|do|da|de|o|a|os|as|um|uma)\b/gi, ' ')
         .replace(/\s+/g, ' ').trim();
 
       let events = await searchEvents(cleanQuery, 60, userId);
@@ -449,6 +502,22 @@ export async function processIncomingMessage(userId, client, message) {
         const firstWord = cleanQuery.split(' ')[0];
         if (firstWord && firstWord !== cleanQuery) events = await searchEvents(firstWord, 60, userId);
       }
+
+      // Filtra por periodo se o Gemini incluiu contexto temporal
+      if (events.length && plan.cancel_event.period) {
+        const { start: periodStart, end: periodEnd } = getPeriodRange(
+          plan.cancel_event.period,
+          plan.cancel_event.startDate,
+          plan.cancel_event.endDate
+        );
+        const startMs = new Date(periodStart).getTime();
+        const endMs = new Date(periodEnd).getTime();
+        events = events.filter(e => {
+          const ts = new Date(e.start?.dateTime || e.start?.date).getTime();
+          return ts >= startMs && ts <= endMs;
+        });
+      }
+
       if (!events.length) {
         await replyToMessage(userId, client, message, `Nao encontrei nenhum evento com "${cleanQuery}".`);
         return;
@@ -469,7 +538,13 @@ export async function processIncomingMessage(userId, client, message) {
         return;
       }
 
-      await replyToMessage(userId, client, message, `Encontrei varios eventos. Seja mais especifico:\n${formatEventsList(events, timeZone)}`);
+      // Multiplos eventos: salva como pending choice e pede numero
+      const choices = events.map(e => ({
+        eventId: e.id, calendarId: e.calendarId, summary: e.summary,
+        start: e.start?.dateTime || e.start?.date,
+      }));
+      pendingActions.set(pendingKey, { type: 'choice', action: 'cancel', choices, createdAt: Date.now() });
+      await replyToMessage(userId, client, message, `Encontrei ${events.length} eventos. Responda apenas o numero do que deseja cancelar:\n${formatNumberedEvents(events, timeZone)}`);
     } catch (error) {
       console.error('Erro ao buscar eventos para cancelar:', error);
       await replyToMessage(userId, client, message, 'Nao consegui buscar o evento para cancelar.');
