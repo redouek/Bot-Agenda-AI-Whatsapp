@@ -162,8 +162,17 @@ export async function createEvent(data, userId, calendarId) {
   }
 
   console.log('[calendar] Criando evento em', targetCalendarId, '- summary:', event.summary);
-  const res = await client.events.insert({ calendarId: targetCalendarId, requestBody: event });
-  return { ...res.data, calendarId: targetCalendarId };
+  try {
+    const res = await client.events.insert({ calendarId: targetCalendarId, requestBody: event });
+    return { ...res.data, calendarId: targetCalendarId };
+  } catch (err) {
+    const status = err?.code || err?.response?.status;
+    const gErr = err?.response?.data?.error;
+    console.error(
+      `[calendar] events.insert falhou em ${targetCalendarId} | status=${status} | reason=${gErr?.errors?.[0]?.reason || ''} | msg=${gErr?.message || err?.message}`
+    );
+    throw err;
+  }
 }
 
 // Agrega eventos de TODAS as agendas do usuario, ordenados por start time

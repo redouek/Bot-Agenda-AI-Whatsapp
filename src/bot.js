@@ -48,8 +48,8 @@ function detectNumericChoice(text = '') {
 
 // Pega nome amigavel das agendas (cache simples em memoria por userId)
 const calendarNamesCache = new Map();
-async function getCalendarNameMap(userId) {
-  if (calendarNamesCache.has(userId)) return calendarNamesCache.get(userId);
+async function getCalendarNameMap(userId, forceRefresh = false) {
+  if (!forceRefresh && calendarNamesCache.has(userId)) return calendarNamesCache.get(userId);
   try {
     const list = await listCalendars(userId);
     const map = new Map(list.map(c => [c.id, c.summary]));
@@ -59,11 +59,21 @@ async function getCalendarNameMap(userId) {
   } catch { return new Map(); }
 }
 
+function shortCalendarLabel(id) {
+  if (!id) return 'Agenda';
+  if (id === 'primary') return 'Agenda principal';
+  if (id.includes('@group.calendar.google.com')) return 'Agenda compartilhada';
+  return id; // ex: e-mail pessoal
+}
+
 async function formatCalendarOptions(userId) {
   const ids = await getCalendarIds(userId);
   if (ids.length <= 1) return null;
-  const names = await getCalendarNameMap(userId);
-  const lines = ids.map((id, i) => `${i + 1}. ${names.get(id) || id}`);
+  let names = await getCalendarNameMap(userId);
+  if (ids.some(id => !names.get(id))) {
+    names = await getCalendarNameMap(userId, true);
+  }
+  const lines = ids.map((id, i) => `${i + 1}. ${names.get(id) || shortCalendarLabel(id)}`);
   return { ids, text: lines.join('\n') };
 }
 
@@ -378,10 +388,36 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
     await replyToMessage(userId, client, message, 'Nao consegui criar o evento no Google Calendar.');
     return true;
   } catch (error) {
-    console.error('Erro ao criar evento confirmado:', error);
-    await replyToMessage(userId, client, message, 'Erro ao criar evento no Google Calendar. Verifique os logs.');
+    console.error('Erro ao criar evento confirmado:', error?.response?.data || error);
+    const friendly = friendlyCalendarError(error);
+    await replyToMessage(userId, client, message, friendly);
     return true;
   }
+}
+
+function friendlyCalendarError(error) {
+  const status = error?.code || error?.response?.status;
+  const gErr = error?.response?.data?.error;
+  const reason = gErr?.errors?.[0]?.reason || '';
+  const msg = gErr?.message || error?.message || '';
+
+  if (status === 401 || /invalid_grant|invalid_token/i.test(msg)) {
+    return 'A conexao com o Google Calendar expirou. Abra o painel de setup e clique novamente em "Conectar Google".';
+  }
+  if (status === 403) {
+    if (/quota|rateLimit|userRateLimit/i.test(reason)) {
+      return 'Limite de uso do Google Calendar atingido. Tente novamente em alguns minutos.';
+    }
+    return 'Sem permissao para escrever nessa agenda. Verifique se a agenda escolhida permite que voce crie eventos.';
+  }
+  if (status === 404) {
+    return 'Agenda nao encontrada. Ela pode ter sido removida da sua conta — atualize a selecao no painel de setup.';
+  }
+  if (status === 400) {
+    return `Os dados do evento foram recusados pelo Google${msg ? ` (${msg})` : ''}. Tente reformular a mensagem com data e hora claras.`;
+  }
+  if (msg) return `Nao consegui criar o evento. Motivo: ${msg}.`;
+  return 'Nao consegui criar o evento no Google Calendar. Tente novamente em instantes.';
 }
 
 // Processa selecao numerica quando ha uma lista pendente (ex: "Encontrei 2 eventos. Responda 1 ou 2")
