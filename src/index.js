@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import pkg from 'whatsapp-web.js';
 import { loadConfig, isPlatformConfigured } from './config.js';
 import { startServer } from './server.js';
@@ -22,6 +23,23 @@ const whatsappInstances = new Map();
 
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function clearChromiumLocks(sessionPath) {
+  try {
+    if (!fs.existsSync(sessionPath)) return;
+    const subdirs = fs.readdirSync(sessionPath, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.startsWith('session-'));
+    for (const d of subdirs) {
+      const dir = path.join(sessionPath, d.name);
+      for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+        const f = path.join(dir, name);
+        try { fs.unlinkSync(f); } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('[index] Falha ao limpar locks do Chromium:', err?.message || err);
+  }
 }
 
 function getExistingRuntime(userId) {
@@ -62,6 +80,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
 
   const sessionPath = getWhatsAppSessionPath(user.id);
   ensureDir(sessionPath);
+  clearChromiumLocks(sessionPath);
 
   await hydrateSelfChatLidFromDb(user.id);
 
