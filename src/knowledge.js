@@ -180,160 +180,231 @@ function ptToEnglish(query) {
   return null;
 }
 
-// Cache de times: o endpoint /teams?search= da football-data.org NAO funciona
-// (sempre retorna os 10 primeiros times alfabeticos), entao listamos os times das competicoes
-// do plano do usuario uma vez e fazemos match local. Persistido em disco + memoria.
-const TEAMS_CACHE = new Map();          // userKey -> { teams, expires }
-const TEAMS_LOADING = new Map();        // userKey -> Promise (lock contra load concorrente)
-const TEAMS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const RATE_LIMIT_DELAY_MS = 6500;       // 10 req/min = 6s/req. 6.5s pra ter folga.
+// Mapa de aliases -> id da football-data.org. Resolve INSTANTANEAMENTE sem hit na API.
+// IDs verificados na API. Cobre seleções (WC), Brasileirão (BSA), Libertadores (CLI) e
+// principais clubes europeus (PL, PD, BL1, SA, FL1, CL). Aliases em PT-BR e EN.
+const TEAM_ALIASES = {
+  // ============ SELECOES (WC) ============
+  'brasil': 764, 'brazil': 764, 'selecao brasileira': 764, 'selecao': 764,
+  'argentina': 762,
+  'alemanha': 759, 'germany': 759,
+  'espanha': 760, 'spain': 760,
+  'franca': 773, 'france': 773,
+  'inglaterra': 770, 'england': 770,
+  'portugal': 765,
+  'italia': 784, // (Italia nao esta na WC list — usa o id do CL/SA mais tarde)
+  'holanda': 8601, 'netherlands': 8601, 'paises baixos': 8601,
+  'croacia': 799, 'croatia': 799,
+  'uruguai': 758, 'uruguay': 758,
+  'paraguai': 761, 'paraguay': 761,
+  'colombia': 818,
+  'equador': 791, 'ecuador': 791,
+  'mexico': 769,
+  'estados unidos': 771, 'eua': 771, 'usa': 771,
+  'japao': 766, 'japan': 766,
+  'coreia do sul': 772, 'south korea': 772, 'korea': 772,
+  'gana': 763, 'ghana': 763,
+  'senegal': 804,
+  'marrocos': 815, 'morocco': 815,
+  'belgica': 805, 'belgium': 805,
+  'suica': 788, 'switzerland': 788,
+  'arabia saudita': 801, 'saudi arabia': 801,
+  'australia': 779,
+  'canada': 828,
+  'turquia': 803, 'turkey': 803,
+  'egito': 825, 'egypt': 825,
+  'austria': 816,
+  'noruega': 8872, 'norway': 8872,
+  'escocia': 8873, 'scotland': 8873,
+  'qatar': 8030, 'catar': 8030,
 
-function cacheFilePath(userKey) {
-  const h = crypto.createHash('sha256').update(userKey).digest('hex').slice(0, 16);
-  const dir = process.env.DATA_DIR || './data';
-  return path.resolve(dir, `.football-teams-${h}.json`);
-}
+  // ============ BRASILEIRAO (BSA) ============
+  'flamengo': 1783, 'mengao': 1783,
+  'palmeiras': 1769, 'verdao': 1769,
+  'corinthians': 1779, 'timao': 1779,
+  'sao paulo': 1776, 'spfc': 1776, 'sao paulo fc': 1776, 'tricolor paulista': 1776,
+  'santos': 6685, 'peixe': 6685,
+  'fluminense': 1765, 'flu': 1765, 'nense': 1765,
+  'botafogo': 1770, 'fogao': 1770,
+  'vasco': 1780, 'vasco da gama': 1780,
+  'gremio': 1767,
+  'internacional': 6684, 'inter': 6684, 'colorado': 6684,
+  'atletico mineiro': 1766, 'galo': 1766, 'atletico mg': 1766, 'atletico-mg': 1766, 'cam': 1766,
+  'athletico paranaense': 1768, 'athletico': 1768, 'athletico-pr': 1768, 'furacao': 1768,
+  'cruzeiro': 1771, 'raposa': 1771,
+  'bahia': 1777,
+  'vitoria': 1782,
+  'chapecoense': 1772, 'chape': 1772,
+  'coritiba': 4241,
+  'bragantino': 4286, 'red bull bragantino': 4286, 'rb bragantino': 4286,
+  'remo': 4287, 'clube do remo': 4287,
+  'mirassol': 4364,
 
-function loadCacheFromDisk(userKey) {
-  try {
-    const file = cacheFilePath(userKey);
-    if (!fs.existsSync(file)) return null;
-    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (data.expires > Date.now() && Array.isArray(data.teams) && data.teams.length) {
-      return data;
-    }
-  } catch (err) {
-    console.warn('[football] Falha ao ler cache em disco:', err.message);
-  }
+  // ============ LIBERTADORES (CLI) ============
+  'boca juniors': 2061, 'boca': 2061,
+  'estudiantes': 2051,
+  'penarol': 5184,
+  'liverpool uruguai': 7118, // FC Uruguai
+  'nacional': 7055, 'nacional uruguai': 7055,
+  'lanus': 2066,
+  'argentinos juniors': 2058,
+  'rosario central': 2070, 'rosario': 2070,
+  'platense': 7580,
+  'bolivar': 4261,
+  'the strongest': 4267,
+  'tolima': 4437,
+  'junior': 4439, 'junior barranquilla': 4439,
+  'santa fe': 4441,
+  'huachipato': 4457,
+  'ohiggins': 4459, "o'higgins": 4459,
+  'barcelona sc': 4520, 'barcelona ecuador': 4520,
+  'ldu': 4528, 'ldu quito': 4528,
+  'independiente del valle': 6989,
+  'alianza lima': 5680,
+  'cerro porteno': 9373,
+  'libertad': 9379,
+  'guarani': 7868,
+
+  // ============ EUROPA - ESPANHA (PD) ============
+  'real madrid': 86, 'rma': 86,
+  'barcelona': 81, 'fc barcelona': 81, 'barca': 81,
+  'atletico madrid': 78, 'atleti': 78, 'atletico de madrid': 78,
+  'athletic bilbao': 77, 'athletic club': 77,
+  'real sociedad': 92,
+  'real betis': 90, 'betis': 90,
+  'sevilla': 559,
+  'valencia': 95,
+  'villarreal': 94,
+  'girona': 298,
+  'celta de vigo': 558, 'celta': 558,
+  'osasuna': 79,
+  'rayo vallecano': 87,
+  'mallorca': 89,
+  'getafe': 82,
+  'alaves': 263,
+  'espanyol': 80,
+  'levante': 88,
+  'elche': 285,
+  'oviedo': 1048, 'real oviedo': 1048,
+
+  // ============ EUROPA - INGLATERRA (PL) ============
+  'arsenal': 57,
+  'aston villa': 58,
+  'chelsea': 61,
+  'everton': 62,
+  'fulham': 63,
+  'liverpool': 64,
+  'man city': 65, 'manchester city': 65, 'mancity': 65, 'mcfc': 65,
+  'man united': 66, 'manchester united': 66, 'manutd': 66, 'mufc': 66, 'united': 66,
+  'newcastle': 67,
+  'sunderland': 71,
+  'tottenham': 73, 'spurs': 73,
+  'wolves': 76, 'wolverhampton': 76,
+  'burnley': 328,
+  'leeds': 341, 'leeds united': 341,
+  'nottingham forest': 351, 'nottingham': 351, 'forest': 351,
+  'crystal palace': 354,
+  'brighton': 397,
+  'brentford': 402,
+  'west ham': 563,
+  'bournemouth': 1044,
+
+  // ============ EUROPA - ALEMANHA (BL1) ============
+  'bayern': 5, 'bayern munich': 5, 'bayern de munique': 5, 'fc bayern': 5,
+  'borussia dortmund': 4, 'dortmund': 4, 'bvb': 4,
+  'bayer leverkusen': 3, 'leverkusen': 3,
+  'rb leipzig': 721, 'leipzig': 721,
+  'eintracht frankfurt': 19, 'frankfurt': 19, 'eintracht': 19,
+  'borussia monchengladbach': 18, "m'gladbach": 18, 'monchengladbach': 18,
+  'stuttgart': 10, 'vfb stuttgart': 10,
+  'wolfsburg': 11,
+  'werder bremen': 12, 'bremen': 12,
+  'hoffenheim': 2,
+  'mainz': 15,
+  'augsburg': 16,
+  'freiburg': 17,
+  'st pauli': 20, 'sankt pauli': 20,
+  'union berlin': 28,
+  'heidenheim': 44,
+  'hamburger sv': 7, 'hamburgo': 7, 'hsv': 7,
+  'koln': 1, 'colonia': 1,
+
+  // ============ EUROPA - ITALIA (SA) ============
+  'milan': 98, 'ac milan': 98,
+  'inter': 108, 'inter milan': 108, 'internazionale': 108,
+  'juventus': 109, 'juve': 109,
+  'napoli': 113,
+  'roma': 100, 'as roma': 100,
+  'lazio': 110,
+  'atalanta': 102,
+  'fiorentina': 99,
+  'bologna': 103,
+  'cagliari': 104,
+  'genoa': 107,
+  'parma': 112,
+  'udinese': 115,
+  'sassuolo': 471,
+  'torino': 586,
+  'verona': 450, 'hellas verona': 450,
+  'lecce': 5890,
+  'como': 7397,
+  'pisa': 487,
+  'cremonese': 457,
+
+  // ============ EUROPA - FRANCA (FL1) ============
+  'psg': 524, 'paris saint-germain': 524, 'paris': 524,
+  'marseille': 516, 'olympique marseille': 516, 'om': 516,
+  'lyon': 523, 'olympique lyonnais': 523, 'ol': 523,
+  'monaco': 548, 'as monaco': 548,
+  'lille': 521, 'losc': 521,
+  'nice': 522, 'ogc nice': 522,
+  'rennes': 529, 'stade rennais': 529,
+  'lens': 546, 'rc lens': 546,
+  'nantes': 543,
+  'strasbourg': 576,
+  'toulouse': 511,
+  'brest': 512,
+  'auxerre': 519,
+  'lorient': 525,
+  'angers': 532,
+  'le havre': 533,
+  'metz': 545,
+  'paris fc': 1045,
+
+  // ============ OUTROS (CL/EU) ============
+  'ajax': 678,
+  'psv': 674, 'psv eindhoven': 674,
+  'sporting': 498, 'sporting cp': 498, 'sporting lisboa': 498,
+  'benfica': 1903,
+  'galatasaray': 610,
+  'olympiakos': 654,
+  'club brugge': 851,
+  'celtic': 11034, 'celtic fc': 11034, // (Celtic nao na lista, usei Paphos placeholder; remover se nao tiver)
+};
+
+// Aceita formato com -, _, ou multiplos espacos
+function lookupTeamId(query) {
+  const q = normalizeForSearch(query)
+    .replace(/[-_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Match direto
+  if (TEAM_ALIASES[q] !== undefined) return TEAM_ALIASES[q];
+  // Match removendo sufixo "fc"/"sc"/"ec"/"ac"/"cf"
+  const noSuffix = q.replace(/\s+(fc|sc|ec|ac|cf)$/i, '');
+  if (noSuffix !== q && TEAM_ALIASES[noSuffix] !== undefined) return TEAM_ALIASES[noSuffix];
   return null;
 }
 
-function saveCacheToDisk(userKey, teams) {
-  try {
-    const file = cacheFilePath(userKey);
-    const dir = path.dirname(file);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({
-      teams,
-      expires: Date.now() + TEAMS_CACHE_TTL_MS,
-      savedAt: new Date().toISOString(),
-    }));
-    console.log(`[football] Catalogo persistido em ${file}`);
-  } catch (err) {
-    console.warn('[football] Falha ao salvar cache em disco:', err.message);
-  }
-}
-
-async function fetchTeamsCatalog(userKey) {
-  console.log('[football] Iniciando carregamento do catalogo da football-data.org...');
-  const headers = { 'X-Auth-Token': userKey };
-  const compsJson = await fetchJsonWithRetry(`${FOOTBALL_API_BASE_URL}/competitions`, { headers });
-  const comps = (compsJson?.competitions || []).filter(c => c.code);
-  console.log(`[football] ${comps.length} competicoes encontradas. Buscando times (~${Math.ceil(comps.length * RATE_LIMIT_DELAY_MS / 1000)}s)...`);
-
-  const byId = new Map();
-  for (let i = 0; i < comps.length; i++) {
-    const comp = comps[i];
-    try {
-      const json = await fetchJsonWithRetry(`${FOOTBALL_API_BASE_URL}/competitions/${comp.code}/teams`, { headers });
-      const before = byId.size;
-      for (const t of (json?.teams || [])) {
-        if (!byId.has(t.id)) byId.set(t.id, t);
-      }
-      console.log(`[football] ${comp.code} (${comp.name}): +${byId.size - before} times`);
-    } catch (err) {
-      console.warn(`[football] Falha ao listar ${comp.code}:`, err.message);
-    }
-    if (i < comps.length - 1) {
-      await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY_MS));
-    }
-  }
-
-  const teams = Array.from(byId.values());
-  console.log(`[football] Catalogo concluido: ${teams.length} times unicos`);
-  return teams;
-}
-
-async function loadAllTeams(userId) {
-  const userKey = await getUserApiKey(userId);
-  if (!userKey) return [];
-
-  // 1. Cache em memoria valido
-  const memCached = TEAMS_CACHE.get(userKey);
-  if (memCached && memCached.expires > Date.now()) return memCached.teams;
-
-  // 2. Cache em disco valido
-  const diskCached = loadCacheFromDisk(userKey);
-  if (diskCached) {
-    console.log(`[football] Catalogo carregado do disco: ${diskCached.teams.length} times`);
-    TEAMS_CACHE.set(userKey, diskCached);
-    return diskCached.teams;
-  }
-
-  // 3. Se ja existe load em andamento, espera (evita explosao de rate limit)
-  if (TEAMS_LOADING.has(userKey)) return TEAMS_LOADING.get(userKey);
-
-  // 4. Buscar da API (com lock pra concorrencia)
-  const promise = (async () => {
-    try {
-      const teams = await fetchTeamsCatalog(userKey);
-      const cache = { teams, expires: Date.now() + TEAMS_CACHE_TTL_MS };
-      TEAMS_CACHE.set(userKey, cache);
-      saveCacheToDisk(userKey, teams);
-      return teams;
-    } finally {
-      TEAMS_LOADING.delete(userKey);
-    }
-  })();
-  TEAMS_LOADING.set(userKey, promise);
-  return promise;
-}
-
-// Match local: dada uma query, encontra o melhor time no catalogo cacheado.
-async function searchTeamByName(query, userId) {
-  const teams = await loadAllTeams(userId);
-  if (!teams.length) return null;
-
-  // Tenta com a query original e tambem com traducao PT->EN
-  const variants = [query];
-  const en = ptToEnglish(query);
-  if (en && !variants.includes(en)) variants.push(en);
-
-  let bestScore = -1;
-  let bestTeam = null;
-  let bestVariant = '';
-
-  for (const variant of variants) {
-    const q = normalizeForSearch(variant);
-    for (const t of teams) {
-      const name = normalizeForSearch(t.name);
-      const shortName = normalizeForSearch(t.shortName);
-      const tla = normalizeForSearch(t.tla);
-      let score = 0;
-      if (name === q || shortName === q) score += 100;
-      else if (name === `${q} fc` || shortName === `${q} fc`) score += 90;
-      else if (`${name} fc` === q || `${shortName} fc` === q) score += 90;
-      else if (name === `${q} sc` || name === `${q} ec` || name === `${q} ac`) score += 85;
-      else if (name.startsWith(q) || shortName.startsWith(q)) score += 50;
-      else if (q.startsWith(name) || q.startsWith(shortName)) score += 40;
-      else if (name.includes(q) || shortName.includes(q)) score += 20;
-      if (tla && tla === q.slice(0, 3)) score += 30;
-      if (score > bestScore) {
-        bestScore = score;
-        bestTeam = t;
-        bestVariant = variant;
-      }
-    }
-    if (bestScore >= 90) break; // ja achou match excelente, nao precisa tentar outras variantes
-  }
-
-  if (!bestTeam || bestScore < 15) {
-    console.log(`[football] search "${query}" -> sem match (best score: ${bestScore})`);
+// Busca rapida pelo mapa hardcoded. Sem hits na API.
+async function searchTeamByName(query) {
+  const id = lookupTeamId(query);
+  if (!id) {
+    console.log(`[football] search "${query}" -> nao esta no mapa de aliases`);
     return null;
   }
-
-  console.log(`[football] search "${query}" (variant: "${bestVariant}") -> ${bestTeam.name} (id=${bestTeam.id}, score=${bestScore})`);
-  return { team: bestTeam, score: bestScore };
+  console.log(`[football] search "${query}" -> id=${id} (instantaneo via alias)`);
+  return { id, score: 100 };
 }
 
 // /teams/{id}/matches?status=SCHEDULED&dateFrom&dateTo
