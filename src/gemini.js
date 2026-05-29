@@ -142,13 +142,13 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
     'Considere historico recente, a mensagem atual e confirmacoes pendentes.',
     'CONTEXTO/FOLLOW-UP: se a mensagem atual for curta ou eliptica (ex: "e de hoje?", "e amanha?", "essa semana?", "e o outro?", "as 14h", "muda pra 15h"), interprete como continuacao da ULTIMA intencao do usuario no historico. Herde o kind (list_events, schedule_proposal, etc) e ajuste apenas o que mudou (ex: "e de hoje?" apos "compromissos de amanha?" vira list_events com period="today").',
     'Para follow-ups de listagem ("e de hoje?", "e essa semana?", "e amanha?"), responda DIRETAMENTE com list_events do periodo correspondente — nao peca confirmacao nem responda "nao consegui entender".',
-    'Se a mensagem for um pedido de agendamento ou trouxer informacoes de evento, produza schedule_proposal.',
+    'Se a mensagem for um pedido de agendamento ou trouxer informacoes de evento UNICO, produza schedule_proposal. Se trouxer MULTIPLOS eventos em datas distintas e nao-recorrentes (ex: "segunda e quarta da semana que vem", "dia 5 e dia 10 as 10h"), produza kind=multiple_events com events:[evento1, evento2, ...]. Cada evento DEVE ter summary, startDateTime e endDateTime preenchidos.',
     'TOM do reply em schedule_proposal: NUNCA afirme que o evento foi agendado/marcado/criado — ainda esta pendente de confirmacao do usuario. Use linguagem provisoria: "anotei", "entendi", "corrigi", "ajustei", "ok, vou propor isso". Exemplos validos: "Anotei.", "Ok, corrigi o nome para X.", "Entendi, ajustei o horario para 15h.". NUNCA escreva "agendado", "marcado", "criado", "salvo" no reply.',
     `REGRA CRITICA de fuso horario: o usuario esta em ${timeZone} (UTC-3, GMT-3). Qualquer horario mencionado pelo usuario (ex: "14:30", "as tres da tarde") esta SEMPRE nesse fuso. O startDateTime DEVE usar o offset -03:00 (ex: "2026-03-25T14:30:00-03:00"). NUNCA trate horarios do usuario como UTC.`,
     'REGRA CRITICA de horario: o horario mencionado pelo usuario e SEMPRE o startDateTime (hora de inicio). Nunca use o horario mencionado como endDateTime. O endDateTime deve ser startDateTime + duracao mencionada, ou startDateTime + 1 hora por padrao.',
-    'Para eventos recorrentes (ex: "toda segunda", "todo dia", "toda semana"), adicione o campo recurrence no evento com a regra RRULE (ex: ["RRULE:FREQ=WEEKLY;BYDAY=MO"]). Para varios dias DENTRO de uma semana especifica e nao-recorrente (ex: "segunda e quarta da semana que vem", "dia 5 e dia 10"), use recurrence com BYDAY=MO,WE e COUNT=2 (ou UNTIL com a data final dessa semana), ou inclua os 2 dias em recurrence. NUNCA proponha um evento UNICO no primeiro dia se o usuario mencionou multiplos dias — o evento proposto DEVE refletir TODOS os dias mencionados.',
-    'COERENCIA ENTRE REPLY E EVENT: o texto do reply DEVE refletir EXATAMENTE o evento proposto. Se o reply diz "anotei X toda segunda e quarta", o event DEVE ter recurrence cobrindo MO e WE. Se o reply menciona "tres reunioes", devem existir tres eventos. NUNCA escreva no reply algo diferente do que esta no event.',
-    'CORRECAO DE EVENTO RECENTE: se a mensagem do usuario corrige, ajusta ou contradiz um evento recem-discutido no historico (ex: "nao era X, era Y", "muda pra Y", "na verdade era Y", "errei, foi Y"), IDENTIFIQUE o evento pelo contexto do historico — NUNCA pergunte "qual evento?" se o historico recente tem clara mencao a um. Produza schedule_proposal com a versao CORRIGIDA (herdando titulo/hora/duracao do original e ajustando apenas o que o usuario corrigiu), e no reply mencione que e a versao corrigida (ex: "Corrigi para segunda e quarta da semana que vem. Confirma?"). Se o evento ja foi CRIADO (historico tem "Evento agendado com sucesso: X"), no reply avise: "Vou propor a versao corrigida. Lembre-se de cancelar o evento anterior depois.".',
+    'Para eventos VERDADEIRAMENTE recorrentes e sem fim definido (ex: "toda segunda" sem "essa semana"/"semana que vem", "todo dia"), adicione recurrence com RRULE (ex: ["RRULE:FREQ=WEEKLY;BYDAY=MO"]). Para varios dias DENTRO de uma semana especifica (ex: "segunda e quarta da semana que vem", "dia 5 e dia 10"), use kind=multiple_events com events: [...] — NAO use recurrence nesse caso.',
+    'COERENCIA REPLY x EVENT/EVENTS: o texto do reply DEVE refletir EXATAMENTE o que vai ser agendado. Se o reply diz "segunda e quarta", events DEVE ter 2 itens (ou recurrence cobrindo MO e WE). NUNCA escreva no reply algo diferente do que sera criado.',
+    'CORRECAO DE EVENTO RECENTE: se a mensagem corrige/contradiz um evento recem-discutido no historico (ex: "nao era X, era Y", "muda pra Y", "na verdade era Y", "errei, foi Y"), IDENTIFIQUE pelo contexto — NUNCA pergunte "qual evento?" se o historico recente cita um. Produza schedule_proposal (ou multiple_events) com a versao CORRIGIDA herdando titulo/hora/duracao do original e ajustando o que mudou. SE o historico mostra "Evento agendado com sucesso: X" (ou seja, ja foi criado no calendar), inclua o campo replacePreviousQuery com o titulo desse evento antigo (ex: "Acupuntura") — o bot vai cancelar o anterior automaticamente apos voce confirmar o novo. No reply diga: "Anotei a versao corrigida. Vou cancelar o anterior assim que voce confirmar." NUNCA diga apenas "lembre-se de cancelar" — use replacePreviousQuery.',
     'Se a mensagem pedir para ver agenda, compromissos, o que tem marcado, produza list_events com period = "today", "tomorrow", "this_week" ou "date_range" (com startDate e endDate em ISO).',
     'Se a mensagem pedir para cancelar, deletar ou remover um evento, produza cancel_event. O campo query DEVE conter APENAS palavras-chave do nome/descricao do evento (ex: "almoco", "Bovinus", "dentista"). NUNCA inclua datas, horarios ou referencias temporais ("amanha", "hoje", "21/05") no query. Quando o usuario mencionar contexto temporal, coloque essa informacao em period ("today", "tomorrow", "this_week" ou "date_range" com startDate/endDate em ISO). Ex: "cancela o almoço de amanha" -> cancel_event: { query: "almoco", period: "tomorrow" }.',
     'Se a mensagem pedir informacao atual sobre futebol, jogos, amistosos, tabela ou proximo jogo, produza lookup com source football. O campo query deve conter APENAS o nome do CLUBE/SELECAO (nunca da cidade!). Para times com nome de cidade (Sao Paulo, Barcelona, Madrid), envie o nome do CLUBE como "Sao Paulo FC", "FC Barcelona", "Real Madrid" — adicionando o sufixo do clube quando ambiguo. Exemplos: pergunta "jogos do sao paulo" -> query="Sao Paulo FC"; "jogos do flamengo" -> query="Flamengo"; "jogos do real madrid" -> query="Real Madrid"; "jogos do barcelona" -> query="FC Barcelona". Nunca envie a pergunta completa.',
@@ -158,7 +158,7 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
     'Se a mensagem for apenas conversa, produza chat.',
     'Responda apenas JSON valido, sem markdown.',
     'Formato:',
-    '{"kind":"chat|schedule_proposal|list_events|cancel_event|lookup|none","reply":"texto opcional","requiresConfirmation":true|false,"event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":"","recurrence":[]},"list_events":{"period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"cancel_event":{"query":"palavras-chave do nome","period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"lookup":{"source":"football|wiki|weather","query":"consulta objetiva","intent":"fixtures|general","period":"today|tomorrow|this_week"}}',
+    '{"kind":"chat|schedule_proposal|multiple_events|list_events|cancel_event|lookup|none","reply":"texto opcional","requiresConfirmation":true|false,"replacePreviousQuery":"titulo do evento antigo a cancelar (opcional, so para correcoes)","event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":"","recurrence":[]},"events":[{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","timeZone":""}],"list_events":{"period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"cancel_event":{"query":"palavras-chave do nome","period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"lookup":{"source":"football|wiki|weather","query":"consulta objetiva","intent":"fixtures|general","period":"today|tomorrow|this_week"}}',
     `Data/hora atual: ${todayLocal}`,
     `Historico recente:\n${historyText}`,
     `Confirmacao pendente: ${pendingText}`,
@@ -207,7 +207,23 @@ export async function planConversationTurn({ message, type, text, history = [], 
       reply: parsed.reply || 'Interpretei isso como um evento. Posso agendar?',
       requiresConfirmation: true,
       event: normalizedEvent,
+      replacePreviousQuery: typeof parsed.replacePreviousQuery === 'string' ? parsed.replacePreviousQuery.trim() : '',
     };
+  }
+
+  if (parsed.kind === 'multiple_events' && Array.isArray(parsed.events) && parsed.events.length) {
+    const normalizedEvents = parsed.events
+      .map(e => normalizeEvent(e, userText))
+      .filter(Boolean);
+    if (normalizedEvents.length) {
+      return {
+        kind: 'multiple_events',
+        reply: parsed.reply || `Interpretei como ${normalizedEvents.length} eventos. Posso agendar?`,
+        requiresConfirmation: true,
+        events: normalizedEvents,
+        replacePreviousQuery: typeof parsed.replacePreviousQuery === 'string' ? parsed.replacePreviousQuery.trim() : '',
+      };
+    }
   }
 
   if (parsed.kind === 'list_events' && parsed.list_events) {

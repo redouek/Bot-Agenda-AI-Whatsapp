@@ -313,6 +313,36 @@ async function createMultipleEvents(events, userId, calendarId) {
   return created;
 }
 
+function normalizeTitle(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+async function cancelPreviousByQuery(userId, query) {
+  try {
+    const results = await searchEvents(query, 60, userId);
+    const target = normalizeTitle(query);
+    const tenMinAgo = Date.now() - 30 * 60 * 1000;
+    const matches = results.filter(e => {
+      if (normalizeTitle(e.summary) !== target) return false;
+      const createdMs = e.created ? new Date(e.created).getTime() : 0;
+      return createdMs >= tenMinAgo;
+    });
+    let lastSummary = '';
+    for (const ev of matches) {
+      try {
+        await deleteEvent(ev.id, userId, ev.calendarId);
+        lastSummary = ev.summary;
+      } catch (err) {
+        console.warn('[bot] Falha ao cancelar evento anterior:', err?.message || err);
+      }
+    }
+    return lastSummary;
+  } catch (err) {
+    console.warn('[bot] Falha ao buscar evento anterior para cancelar:', err?.message || err);
+    return '';
+  }
+}
+
 async function handlePendingConfirmation(userId, client, message, chatId, confirmation) {
   const pendingKey = userScopedKey(userId, chatId);
   const pending = pendingActions.get(pendingKey);
@@ -333,6 +363,11 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
       pendingActions.delete(pendingKey);
       await replyToMessage(userId, client, message, `Evento "${pending.summary}" cancelado com sucesso.`);
       return true;
+    }
+
+    let replacedSummary = '';
+    if (pending.replacePreviousQuery && (pending.type === 'single_event' || pending.type === 'multiple_events')) {
+      replacedSummary = await cancelPreviousByQuery(userId, pending.replacePreviousQuery);
     }
 
     if (pending.type === 'multiple_events') {
@@ -356,7 +391,8 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
       pendingActions.delete(pendingKey);
       if (created.length) {
         const summary = created.map(item => `- ${item.summary}`).join('\n');
-        await replyToMessage(userId, client, message, `Eventos agendados com sucesso:\n${summary}`);
+        const prefix = replacedSummary ? `Cancelei "${replacedSummary}" e agendei a versao corrigida:\n` : 'Eventos agendados com sucesso:\n';
+        await replyToMessage(userId, client, message, `${prefix}${summary}`);
         return true;
       }
       await replyToMessage(userId, client, message, 'Nao consegui criar os eventos no Google Calendar.');
@@ -382,7 +418,10 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
     const created = await createEvent(pending.event, userId, targetCalendarId);
     pendingActions.delete(pendingKey);
     if (created?.id) {
-      await replyToMessage(userId, client, message, `Evento agendado com sucesso: ${pending.event.summary}.`);
+      const msg = replacedSummary
+        ? `Cancelei "${replacedSummary}" e agendei a versao corrigida: ${pending.event.summary}.`
+        : `Evento agendado com sucesso: ${pending.event.summary}.`;
+      await replyToMessage(userId, client, message, msg);
       return true;
     }
     await replyToMessage(userId, client, message, 'Nao consegui criar o evento no Google Calendar.');
@@ -500,7 +539,26 @@ export async function processIncomingMessage(userId, client, message) {
   console.log(`[bot:${userId}] Plano Gemini:`, plan.kind, plan.reply?.slice(0, 60));
 
   if (plan.kind === 'schedule_proposal' && plan.event) {
-    const nextPendingAction = { type: 'single_event', event: plan.event, createdAt: Date.now() };
+    const nextPendingAction = {
+      type: 'single_event',
+      event: plan.event,
+      replacePreviousQuery: plan.replacePreviousQuery || '',
+      createdAt: Date.now(),
+    };
+    pendingActions.set(pendingKey, nextPendingAction);
+    const confirmText = await formatPendingActionForConfirmation(nextPendingAction, userId);
+    const responseText = plan.reply ? `${plan.reply}\n\n${confirmText}` : confirmText;
+    await replyToMessage(userId, client, message, responseText);
+    return;
+  }
+
+  if (plan.kind === 'multiple_events' && Array.isArray(plan.events) && plan.events.length) {
+    const nextPendingAction = {
+      type: 'multiple_events',
+      events: plan.events,
+      replacePreviousQuery: plan.replacePreviousQuery || '',
+      createdAt: Date.now(),
+    };
     pendingActions.set(pendingKey, nextPendingAction);
     const confirmText = await formatPendingActionForConfirmation(nextPendingAction, userId);
     const responseText = plan.reply ? `${plan.reply}\n\n${confirmText}` : confirmText;
