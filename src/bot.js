@@ -46,6 +46,11 @@ function detectNumericChoice(text = '') {
   return m ? parseInt(m[1], 10) : null;
 }
 
+function detectChooseAll(text = '') {
+  const n = normalizeText(text);
+  return ['ambos', 'todos', 'todas', 'os dois', 'as duas', 'os 2', 'as 2', 'tudo', 'all', 'both'].includes(n);
+}
+
 // Pega nome amigavel das agendas (cache simples em memoria por userId)
 const calendarNamesCache = new Map();
 async function getCalendarNameMap(userId, forceRefresh = false) {
@@ -365,6 +370,25 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
       return true;
     }
 
+    if (pending.type === 'cancel_multiple') {
+      const removed = [];
+      for (const it of (pending.items || [])) {
+        try {
+          await deleteEvent(it.eventId, userId, it.calendarId);
+          removed.push(it.summary);
+        } catch (err) {
+          console.warn('[bot] Falha ao cancelar item:', err?.message || err);
+        }
+      }
+      pendingActions.delete(pendingKey);
+      if (removed.length) {
+        await replyToMessage(userId, client, message, `Cancelei ${removed.length} eventos:\n${removed.map(s => `- ${s}`).join('\n')}`);
+      } else {
+        await replyToMessage(userId, client, message, 'Nao consegui cancelar os eventos. Tente novamente.');
+      }
+      return true;
+    }
+
     let replacedSummary = '';
     if (pending.replacePreviousQuery && (pending.type === 'single_event' || pending.type === 'multiple_events')) {
       replacedSummary = await cancelPreviousByQuery(userId, pending.replacePreviousQuery);
@@ -488,6 +512,27 @@ async function handlePendingChoice(userId, client, message, chatId, index) {
   return false;
 }
 
+async function handlePendingChooseAll(userId, client, message, chatId) {
+  const pendingKey = userScopedKey(userId, chatId);
+  const pending = pendingActions.get(pendingKey);
+  if (!pending || pending.type !== 'choice' || pending.action !== 'cancel') return false;
+  const choices = pending.choices || [];
+  if (!choices.length) return false;
+
+  const next = { type: 'cancel_multiple', items: choices, createdAt: Date.now() };
+  pendingActions.set(pendingKey, next);
+  const lines = choices.map((c, i) => {
+    const timeZone = getTimeZone();
+    const timeStr = c.start && c.start.includes('T') ? ' ' + formatTimeOnly(c.start, timeZone) : '';
+    return `${i + 1}. ${c.summary} (${formatDateOnly(c.start, timeZone)}${timeStr})`;
+  });
+  await replyToMessage(
+    userId, client, message,
+    `Quer cancelar TODOS os ${choices.length} eventos abaixo?\n${lines.join('\n')}\nResponda "sim" para confirmar ou "nao" para manter.`
+  );
+  return true;
+}
+
 export async function processIncomingMessage(userId, client, message) {
   // Verifica self-chat ANTES do dedup (evita adicionar ID e bloquear polling depois)
   let chat;
@@ -527,6 +572,8 @@ export async function processIncomingMessage(userId, client, message) {
   // Se ha uma lista pendente de escolha e o user respondeu so um numero, processa selecao
   const choiceIdx = detectNumericChoice(body);
   if (choiceIdx && await handlePendingChoice(userId, client, message, chatId, choiceIdx)) return;
+
+  if (detectChooseAll(body) && await handlePendingChooseAll(userId, client, message, chatId)) return;
 
   const confirmation = detectConfirmation(body);
   if (confirmation && await handlePendingConfirmation(userId, client, message, chatId, confirmation)) return;
