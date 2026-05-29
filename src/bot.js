@@ -48,7 +48,13 @@ function detectNumericChoice(text = '') {
 
 function detectChooseAll(text = '') {
   const n = normalizeText(text);
-  return ['ambos', 'todos', 'todas', 'os dois', 'as duas', 'os 2', 'as 2', 'tudo', 'all', 'both'].includes(n);
+  const exact = [
+    'ambos', 'ambas', 'todos', 'todas', 'os dois', 'as duas', 'os 2', 'as 2',
+    'tudo', 'all', 'both', 'esses dois', 'essas duas', 'esses 2', 'essas 2',
+    'os ultimos', 'as ultimas', 'os dois ultimos', 'as duas ultimas',
+    'os 2 ultimos', 'as 2 ultimas', 'os ultimos dois', 'as ultimas duas',
+  ];
+  return exact.includes(n);
 }
 
 // Pega nome amigavel das agendas (cache simples em memoria por userId)
