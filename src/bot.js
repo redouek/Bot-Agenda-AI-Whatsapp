@@ -1,4 +1,4 @@
-import { planConversationTurn } from './gemini.js';
+import { planConversationTurn, friendlyAiError } from './gemini.js';
 import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminders, getCalendarIds, listCalendars } from './calendar.js';
 import { runLookup } from './knowledge.js';
 import { getConfig } from './config.js';
@@ -587,7 +587,14 @@ export async function processIncomingMessage(userId, client, message) {
   const pendingKey = userScopedKey(userId, chatId);
   const history = await getRecentHistory(userId, chat, message?.id?._serialized);
   const pendingAction = pendingActions.get(pendingKey) || null;
-  const plan = await planConversationTurn({ message, type: message.type, text: body, history, pendingAction });
+  let plan;
+  try {
+    plan = await planConversationTurn({ message, type: message.type, text: body, history, pendingAction });
+  } catch (error) {
+    console.error(`[bot:${userId}] Falha na chamada do Gemini:`, error?.status, error?.message);
+    await replyToMessage(userId, client, message, friendlyAiError(error));
+    return;
+  }
 
   console.log(`[bot:${userId}] Plano Gemini:`, plan.kind, plan.reply?.slice(0, 60));
 

@@ -177,6 +177,28 @@ async function generateJson(parts) {
   return extractJsonObject(raw) || { kind: 'none', reply: '', requiresConfirmation: false };
 }
 
+export function friendlyAiError(error) {
+  const status = error?.status || error?.response?.status;
+  const msg = error?.message || error?.response?.data?.error?.message || '';
+
+  if (status === 429) {
+    if (/prepayment credits are depleted|billing|quota.*exhausted|out of credits/i.test(msg)) {
+      return 'O assistente esta sem credito na API de IA. Avise o administrador para recarregar a conta.';
+    }
+    return 'Muitas mensagens em sequencia. Espere uns segundos e tente de novo.';
+  }
+  if (status === 401 || status === 403) {
+    return 'A chave da IA esta invalida ou sem permissao. Avise o administrador.';
+  }
+  if (status === 503 || status === 500) {
+    return 'A IA esta instavel agora. Tente novamente em alguns instantes.';
+  }
+  if (/timeout|ETIMEDOUT|ECONNRESET/i.test(msg)) {
+    return 'A IA demorou para responder. Tente novamente.';
+  }
+  return 'Nao consegui processar sua mensagem agora. Tente novamente em instantes.';
+}
+
 async function downloadInlinePart(message) {
   if (!message?.hasMedia) return null;
 
