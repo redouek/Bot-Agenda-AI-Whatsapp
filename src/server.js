@@ -277,7 +277,10 @@ async function handleRequest(req, res, manager) {
   const pathname = url.pathname;
 
   // ---------- Paginas HTML/JS/CSS (publicas) ----------
-  if (pathname === '/' || pathname === '/setup' || pathname === '/status') {
+  if (pathname === '/') {
+    return serveFile(res, path.join(WEB_DIR, 'landing.html'), 'text/html; charset=utf-8');
+  }
+  if (pathname === '/setup' || pathname === '/status') {
     return serveFile(res, path.join(WEB_DIR, 'index.html'), 'text/html; charset=utf-8');
   }
   if (pathname === '/admin') {
