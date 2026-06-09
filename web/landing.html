@@ -3,22 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Agenda AI ReD Whatsapp - Sua agenda no WhatsApp</title>
-  <meta name="description" content="Agenda AI ReD Whatsapp e um assistente pessoal que conecta seu WhatsApp ao seu Google Calendar. Crie, liste e cancele eventos por mensagem." />
+  <title>Agenda AI ReD Whatsapp - Assistente pessoal de agenda no WhatsApp</title>
+  <meta name="description" content="Agenda AI ReD Whatsapp e um assistente pessoal que conecta seu WhatsApp ao seu Google Calendar. Crie, liste e cancele eventos por mensagem em linguagem natural." />
   <link rel="stylesheet" href="/web/style.css" />
   <style>
     .landing-footer { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.08); font-size: 0.85rem; opacity: 0.7; text-align: center; }
     .landing-footer a { color: inherit; }
+    .scope-list { list-style: none; padding: 0; margin: 0; }
+    .scope-list li { padding: 0.65rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .scope-list li:last-child { border-bottom: none; }
+    .scope-list code { background: rgba(255,255,255,0.06); padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.85em; }
   </style>
-  <!-- GOOGLE_SEARCH_CONSOLE_META -->
 </head>
 <body class="help-page">
   <main class="app-shell">
     <aside class="brand-panel">
       <div class="brand-mark">AI</div>
       <p class="eyebrow">Agenda AI ReD Whatsapp</p>
-      <h1>Sua agenda no WhatsApp.</h1>
-      <p class="brand-copy">Um assistente pessoal que conecta sua conta Google Calendar ao seu WhatsApp. Voce manda mensagem e ele agenda, lista, cancela ou lembra. Sem app pra instalar, sem trocar de tela.</p>
+      <h1>Agenda AI ReD Whatsapp</h1>
+      <p class="brand-copy">Assistente pessoal que conecta sua conta Google Calendar ao seu WhatsApp. Voce manda mensagem em linguagem natural e ele agenda, lista, cancela ou lembra de compromissos. Sem app pra instalar, sem trocar de tela.</p>
 
       <div class="phone-preview" aria-hidden="true">
         <div class="phone-top"></div>
@@ -31,7 +34,7 @@
     <section class="workspace">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Como funciona</p>
+          <p class="eyebrow">Sobre o app</p>
           <h2>Agenda AI ReD Whatsapp</h2>
         </div>
         <a class="btn-primary" href="/setup">Conectar minha conta</a>
@@ -39,9 +42,16 @@
 
       <section class="panel">
         <div class="panel-heading">
-          <p class="eyebrow">Para que serve</p>
+          <p class="eyebrow">O que e o Agenda AI ReD Whatsapp</p>
+          <h3>Um assistente pessoal de agenda no WhatsApp</h3>
+          <p>O <strong>Agenda AI ReD Whatsapp</strong> e um servico web que conecta dois sistemas que voce ja usa: o <strong>WhatsApp</strong> (atraves do chat "Mensagens Salvas" do seu proprio numero) e o <strong>Google Calendar</strong> (suas agendas pessoais). O bot interpreta as mensagens que voce envia para si mesmo no WhatsApp usando inteligencia artificial e executa acoes na sua agenda do Google em seu nome, sempre com confirmacao previa antes de qualquer mudanca.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Funcionalidades</p>
           <h3>O que voce pode fazer</h3>
-          <p>O Agenda AI ReD Whatsapp interpreta mensagens em linguagem natural e age no seu Google Calendar em seu nome. Voce envia um pedido pelo chat <strong>Mensagens Salvas</strong> do seu proprio WhatsApp e o bot responde, confirma e executa.</p>
         </div>
         <details class="helper" open>
           <summary>Exemplos de comandos</summary>
@@ -49,19 +59,45 @@
             <li><strong>Criar evento</strong>: "agenda reuniao com Ana terca as 15h no escritorio"</li>
             <li><strong>Listar agenda</strong>: "o que tenho amanha?"</li>
             <li><strong>Cancelar evento</strong>: "cancela o almoco de quinta"</li>
-            <li><strong>Multiplos dias</strong>: "fisioterapia segunda e quarta da semana que vem 11:30"</li>
-            <li><strong>Receber lembrete</strong>: o bot avisa minutos antes de cada compromisso.</li>
-            <li><strong>Consultar tempo, futebol, enciclopedia</strong>: "vai chover amanha em SP?", "proximos jogos do Sao Paulo".</li>
+            <li><strong>Eventos em multiplos dias</strong>: "fisioterapia segunda e quarta da semana que vem 11:30"</li>
+            <li><strong>Receber lembretes</strong>: o bot avisa minutos antes de cada compromisso.</li>
+            <li><strong>Consultas auxiliares</strong>: "vai chover amanha em SP?", "proximos jogos do Sao Paulo".</li>
           </ul>
         </details>
       </section>
 
       <section class="panel">
         <div class="panel-heading">
-          <p class="eyebrow">Privacidade</p>
-          <h3>O que pedimos da sua conta</h3>
-          <p>Pedimos acesso apenas ao Google Calendar (para criar/listar/cancelar eventos) e ao seu e-mail (para te identificar). Voce pode desconectar a qualquer momento pelo painel ou em <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</p>
-          <p>Detalhes completos: <a href="/privacy">Politica de Privacidade</a> e <a href="/terms">Termos de Servico</a>.</p>
+          <p class="eyebrow">Transparencia sobre dados</p>
+          <h3>Quais dados pedimos da sua conta Google e por que</h3>
+          <p>Quando voce conecta sua conta Google, o Agenda AI ReD Whatsapp solicita os seguintes escopos OAuth. Pedimos apenas o minimo necessario para a funcionalidade descrita acima:</p>
+        </div>
+        <ul class="scope-list">
+          <li>
+            <strong>Eventos do Google Calendar</strong> &mdash; <code>.../auth/calendar.events</code><br/>
+            <small>Por que: criar, atualizar e remover eventos nas suas agendas conforme voce pedir via WhatsApp. Sem isso, o bot nao consegue agendar nada.</small>
+          </li>
+          <li>
+            <strong>Lista de agendas (somente leitura)</strong> &mdash; <code>.../auth/calendar.readonly</code><br/>
+            <small>Por que: listar suas agendas Google para que voce escolha em qual o evento sera criado. So leitura — nao modifica nada.</small>
+          </li>
+          <li>
+            <strong>Endereco de e-mail</strong> &mdash; <code>.../auth/userinfo.email</code><br/>
+            <small>Por que: identificar voce como usuario no nosso sistema. E o unico dado pessoal armazenado para login.</small>
+          </li>
+        </ul>
+        <p style="margin-top: 1rem;">Nao pedimos acesso a contatos, fotos, drive, gmail, localizacao ou qualquer outro escopo alem dos listados acima. Voce pode revogar o acesso a qualquer momento em <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <p class="eyebrow">Documentos legais</p>
+          <h3>Privacidade e Termos</h3>
+          <p>Antes de conectar sua conta, leia nossos documentos legais. Eles descrevem em detalhe quais dados coletamos, com quem compartilhamos e quais sao seus direitos:</p>
+        </div>
+        <div class="form-footer">
+          <a class="btn-secondary" href="https://agendaaiwhatsapp.renatodouek.com.br/privacy">Politica de Privacidade</a>
+          <a class="btn-secondary" href="https://agendaaiwhatsapp.renatodouek.com.br/terms">Termos de Servico</a>
         </div>
       </section>
 
@@ -69,7 +105,7 @@
         <div class="panel-heading">
           <p class="eyebrow">Comecar</p>
           <h3>Pronto para conectar</h3>
-          <p>Clique abaixo para abrir o painel de configuracao. Voce precisara entrar com sua conta Google, autorizar o acesso a sua agenda e escanear o QR code do WhatsApp.</p>
+          <p>Clique abaixo para abrir o painel de configuracao. Voce precisara entrar com sua conta Google, autorizar o acesso a sua agenda e escanear o QR code do WhatsApp Web.</p>
         </div>
         <div class="form-footer">
           <a class="btn-primary" href="/setup">Abrir painel de configuracao</a>
@@ -78,7 +114,7 @@
       </section>
 
       <footer class="landing-footer">
-        <p>Agenda AI ReD Whatsapp &middot; <a href="/privacy">Privacidade</a> &middot; <a href="/terms">Termos</a> &middot; Contato: douek.renato@gmail.com</p>
+        <p><strong>Agenda AI ReD Whatsapp</strong> &middot; <a href="https://agendaaiwhatsapp.renatodouek.com.br/privacy">Politica de Privacidade</a> &middot; <a href="https://agendaaiwhatsapp.renatodouek.com.br/terms">Termos de Servico</a> &middot; Contato: douek.renato@gmail.com</p>
       </footer>
     </section>
   </main>
