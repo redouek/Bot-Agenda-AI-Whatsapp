@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Politica de Privacidade - Agenda Ai WhatsApp</title>
+  <link rel="stylesheet" href="/web/style.css" />
+</head>
+<body class="help-page">
+  <main class="app-shell">
+    <aside class="brand-panel">
+      <div class="brand-mark">AI</div>
+      <p class="eyebrow">Documento legal</p>
+      <h1>Politica de Privacidade</h1>
+      <p class="brand-copy">Como o Agenda Ai WhatsApp coleta, usa e protege seus dados.</p>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Ultima atualizacao: 20 de maio de 2026</p>
+          <h2>Resumo em uma frase</h2>
+        </div>
+        <a class="btn-secondary" href="/">Voltar</a>
+      </header>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>Resumo</h3>
+          <p>O Agenda Ai WhatsApp e um assistente pessoal que conecta seu WhatsApp ao seu Google Calendar para criar, listar e cancelar eventos por mensagem. Coletamos apenas o minimo necessario para que isso funcione, nao vendemos seus dados e nao os compartilhamos com terceiros alem dos servicos do Google necessarios para a operacao.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>1. Quem somos</h3>
+          <p>O servico Agenda Ai WhatsApp e mantido por Renato Douek, contato pelo e-mail douek.renato@gmail.com. Este servico e oferecido em base nao-comercial para uso pessoal e dos usuarios autorizados.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>2. Quais dados coletamos</h3>
+        </div>
+        <details class="helper" open>
+          <summary>Lista completa</summary>
+          <ul>
+            <li><strong>E-mail da sua conta Google:</strong> usado como identificador unico de usuario no nosso sistema.</li>
+            <li><strong>Tokens OAuth do Google (access e refresh tokens):</strong> armazenados de forma criptografada no nosso banco SQLite. Servem para o bot conseguir agir no Google Calendar em seu nome sem pedir senha.</li>
+            <li><strong>IDs e nomes das suas agendas Google Calendar selecionadas:</strong> apenas das agendas que voce explicitamente marcou no painel de setup.</li>
+            <li><strong>Sessao do WhatsApp Web:</strong> tokens locais usados pela biblioteca whatsapp-web.js para manter a conexao com sua conta. Equivalente ao seu WhatsApp Web no navegador.</li>
+            <li><strong>Mensagens trocadas entre voce e o bot:</strong> as ultimas 6 mensagens sao mantidas em memoria temporariamente para que a IA entenda o contexto da conversa atual. Nao gravamos historico permanente das mensagens.</li>
+            <li><strong>Chaves de API que voce informar:</strong> chave do Gemini, chave do Football Data (opcional). Armazenadas no banco para serem usadas em seu nome.</li>
+            <li><strong>Telefone associado ao chat de Mensagens Salvas:</strong> usado para que o bot saiba qual chat e o seu self-chat.</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>3. Como usamos seus dados</h3>
+        </div>
+        <details class="helper" open>
+          <summary>Finalidades</summary>
+          <ul>
+            <li>Ler suas mensagens no chat de Mensagens Salvas do WhatsApp para interpretar pedidos como "agenda reuniao amanha 10h".</li>
+            <li>Chamar a API do Google Calendar em seu nome para criar, listar, cancelar ou consultar eventos nas agendas que voce selecionou.</li>
+            <li>Chamar a API do Google Gemini para interpretar o texto das suas mensagens em linguagem natural.</li>
+            <li>Opcionalmente, consultar APIs externas (Football Data, Open-Meteo, Wikipedia) quando voce pedir informacoes especificas.</li>
+            <li>Enviar lembretes proximos a um evento agendado, se essa funcionalidade estiver ativa.</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>4. Escopos do Google solicitados</h3>
+          <p>Pedimos acesso apenas aos escopos minimos necessarios para a funcionalidade descrita:</p>
+        </div>
+        <details class="helper" open>
+          <summary>Escopos</summary>
+          <ul>
+            <li><code>.../auth/calendar.events</code> — criar, ler, atualizar e deletar eventos nas suas agendas.</li>
+            <li><code>.../auth/calendar.readonly</code> — listar suas agendas para que voce escolha em qual criar cada evento.</li>
+            <li><code>.../auth/userinfo.email</code> — saber o e-mail da sua conta para identifica-lo no sistema.</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>5. Compartilhamento de dados</h3>
+          <p>Nao vendemos seus dados. Compartilhamos seus dados apenas com os servicos que sao tecnicamente necessarios para o funcionamento do bot:</p>
+        </div>
+        <details class="helper" open>
+          <summary>Para quem enviamos</summary>
+          <ul>
+            <li><strong>Google (Calendar e OAuth):</strong> para executar as acoes na sua agenda.</li>
+            <li><strong>Google Gemini (IA generativa):</strong> recebe o texto das suas mensagens recentes (ultimas 6) para interpretar a intencao. Sujeito aos termos do Google AI.</li>
+            <li><strong>Meta/WhatsApp:</strong> a sessao do WhatsApp Web e mantida via servidores oficiais do WhatsApp.</li>
+            <li><strong>APIs externas (apenas quando voce solicita):</strong> Football Data, Open-Meteo, Wikipedia. Enviamos apenas a query especifica (ex: nome do time, nome da cidade).</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>6. Onde os dados ficam</h3>
+          <p>Banco de dados SQLite no servidor que opera o bot (atualmente hospedado em servidor proprio). O banco contem tokens OAuth, chaves de API e configuracoes — nao contem historico de conversa permanente. Sessoes do WhatsApp Web ficam no disco local do servidor.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>7. Seus direitos</h3>
+        </div>
+        <details class="helper" open>
+          <summary>O que voce pode fazer</summary>
+          <ul>
+            <li><strong>Desconectar a qualquer momento:</strong> pelo painel de setup, voce pode desconectar o Google e parar o bot.</li>
+            <li><strong>Revogar acesso pelo Google:</strong> em <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a> voce pode remover o acesso do app a qualquer momento.</li>
+            <li><strong>Excluir seus dados:</strong> envie um e-mail para douek.renato@gmail.com solicitando exclusao. Todos os tokens, chaves e configuracoes sao apagados em ate 7 dias.</li>
+            <li><strong>Consultar quais dados temos:</strong> mesmo e-mail acima.</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>8. Cookies</h3>
+          <p>O painel de setup usa apenas um cookie de sessao (HttpOnly) para manter voce autenticado. Nao usamos cookies de rastreamento, analytics nem publicidade.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>9. Mudancas nesta politica</h3>
+          <p>Se houver mudanca relevante, atualizaremos a data no topo desta pagina. Continuar usando o servico apos a atualizacao significa que voce aceita os novos termos.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h3>10. Contato</h3>
+          <p>Para qualquer duvida sobre esta politica ou sobre seus dados, escreva para <strong>douek.renato@gmail.com</strong>.</p>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

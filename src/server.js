@@ -289,6 +289,12 @@ async function handleRequest(req, res, manager) {
   if (pathname === '/tutorial') {
     return serveFile(res, path.join(WEB_DIR, 'tutorial.html'), 'text/html; charset=utf-8');
   }
+  if (pathname === '/privacy' || pathname === '/privacidade') {
+    return serveFile(res, path.join(WEB_DIR, 'privacy.html'), 'text/html; charset=utf-8');
+  }
+  if (pathname === '/terms' || pathname === '/termos') {
+    return serveFile(res, path.join(WEB_DIR, 'terms.html'), 'text/html; charset=utf-8');
+  }
   if (pathname === '/web/style.css') {
     return serveFile(res, path.join(WEB_DIR, 'style.css'), 'text/css');
   }
