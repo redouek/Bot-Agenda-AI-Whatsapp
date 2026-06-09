@@ -19,11 +19,16 @@ function getOAuthClient() {
   );
 }
 
+const CALENDAR_SCOPES = [
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.readonly',
+];
+
 const LOGIN_SCOPES = [
   'openid',
   'email',
   'profile',
-  'https://www.googleapis.com/auth/calendar',
+  ...CALENDAR_SCOPES,
 ];
 
 // Url para fluxo de LOGIN — pede identidade (email/sub) alem do Calendar.
@@ -43,7 +48,7 @@ export function getAuthUrl(userId) {
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/calendar'],
+    scope: CALENDAR_SCOPES,
     state: userId,
   });
 }
