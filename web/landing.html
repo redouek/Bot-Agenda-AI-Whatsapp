@@ -5,20 +5,100 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Agenda AI ReD Whatsapp - Assistente pessoal de agenda no WhatsApp</title>
   <meta name="description" content="Agenda AI ReD Whatsapp e um assistente pessoal que conecta seu WhatsApp ao seu Google Calendar. Crie, liste e cancele eventos por mensagem em linguagem natural." />
+  <link rel="icon" type="image/png" href="/web/agenda-ai-logo.png" />
   <link rel="stylesheet" href="/web/style.css" />
   <style>
-    .landing-footer { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.08); font-size: 0.85rem; opacity: 0.7; text-align: center; }
-    .landing-footer a { color: inherit; }
+    /* ===== Paleta Agenda AI ReD: amarelo + preto ===== */
+    body.help-page {
+      background:
+        radial-gradient(circle at top left, rgba(255, 203, 5, .22), transparent 34rem),
+        linear-gradient(145deg, #fffbe6 0%, #fff4b8 100%) !important;
+      color: #1a1a1a;
+    }
+    body.help-page .app-shell {
+      background: rgba(255, 255, 255, .82);
+      border: 1px solid rgba(0, 0, 0, .08);
+    }
+
+    /* Painel da marca (lateral esquerda) */
+    body.help-page .brand-panel {
+      background:
+        linear-gradient(160deg, #1a1a1a 0%, #2c2c2c 100%);
+      color: #ffcb05;
+    }
+    body.help-page .brand-panel h1 { color: #ffcb05; font-size: 1.65rem; line-height: 1.15; }
+    body.help-page .brand-panel .eyebrow { color: #ffcb05; opacity: .85; letter-spacing: .08em; text-transform: uppercase; font-size: .72rem; font-weight: 700; }
+    body.help-page .brand-panel .brand-copy { color: #f5f5f5; opacity: .92; }
+
+    /* Logo grande */
+    body.help-page .brand-mark {
+      width: 96px;
+      height: 96px;
+      background: transparent !important;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
+    }
+    body.help-page .brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; }
+
+    /* Workspace (direita) */
+    body.help-page .topbar h2 { color: #1a1a1a; }
+    body.help-page .topbar .eyebrow { color: #b8860b; text-transform: uppercase; letter-spacing: .08em; font-size: .72rem; font-weight: 700; }
+
+    /* Panels */
+    body.help-page .panel { background: #fffdf5; border: 1px solid rgba(0, 0, 0, .06); }
+    body.help-page .panel h3 { color: #1a1a1a; }
+    body.help-page .panel .eyebrow { color: #b8860b; }
+    body.help-page .panel p, body.help-page .panel li { color: #2c2c2c; }
+    body.help-page .panel strong { color: #1a1a1a; }
+    body.help-page .panel a { color: #b8860b; font-weight: 700; }
+    body.help-page .panel a:hover { color: #8a6500; }
+
+    /* Botoes */
+    body.help-page .btn-primary {
+      background: #1a1a1a;
+      color: #ffcb05 !important;
+      border: 2px solid #1a1a1a;
+      font-weight: 800;
+      text-decoration: none;
+    }
+    body.help-page .btn-primary:hover { background: #ffcb05; color: #1a1a1a !important; border-color: #1a1a1a; }
+    body.help-page .btn-secondary {
+      background: transparent;
+      color: #1a1a1a !important;
+      border: 2px solid #1a1a1a;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    body.help-page .btn-secondary:hover { background: #1a1a1a; color: #ffcb05 !important; }
+
+    /* Helper/details */
+    body.help-page .helper { background: #fffbeb; border: 1px solid #ffe27a; }
+    body.help-page .helper summary { color: #1a1a1a; font-weight: 700; }
+    body.help-page .helper code { background: rgba(0, 0, 0, .08); color: #1a1a1a; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.85em; }
+
+    /* Phone preview */
+    body.help-page .phone-preview { background: rgba(255, 203, 5, .12); border: 1px solid rgba(255, 203, 5, .35); }
+    body.help-page .chat-bubble.incoming { background: #2c2c2c; color: #ffcb05; border-color: #1a1a1a; }
+    body.help-page .chat-bubble.outgoing { background: #ffcb05; color: #1a1a1a; border-color: #b8860b; }
+
+    /* Lista de escopos */
     .scope-list { list-style: none; padding: 0; margin: 0; }
-    .scope-list li { padding: 0.65rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .scope-list li { padding: 0.75rem 0; border-bottom: 1px solid rgba(0, 0, 0, .08); }
     .scope-list li:last-child { border-bottom: none; }
-    .scope-list code { background: rgba(255,255,255,0.06); padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.85em; }
+
+    /* Footer */
+    .landing-footer { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(0, 0, 0, .1); font-size: 0.85rem; color: #5a5a5a; text-align: center; }
+    .landing-footer a { color: #1a1a1a; font-weight: 700; }
+    .landing-footer strong { color: #1a1a1a; }
   </style>
 </head>
 <body class="help-page">
   <main class="app-shell">
     <aside class="brand-panel">
-      <div class="brand-mark">AI</div>
+      <div class="brand-mark">
+        <img src="/web/agenda-ai-logo.png" alt="Agenda AI ReD" />
+      </div>
       <p class="eyebrow">Agenda AI ReD Whatsapp</p>
       <h1>Agenda AI ReD Whatsapp</h1>
       <p class="brand-copy">Assistente pessoal que conecta sua conta Google Calendar ao seu WhatsApp. Voce manda mensagem em linguagem natural e ele agenda, lista, cancela ou lembra de compromissos. Sem app pra instalar, sem trocar de tela.</p>

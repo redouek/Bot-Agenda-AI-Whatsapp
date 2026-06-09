@@ -298,6 +298,9 @@ async function handleRequest(req, res, manager) {
   if (pathname === '/terms' || pathname === '/termos') {
     return serveFile(res, path.join(WEB_DIR, 'terms.html'), 'text/html; charset=utf-8');
   }
+  if (pathname === '/web/agenda-ai-logo.png') {
+    return serveFile(res, path.join(WEB_DIR, 'agenda-ai-logo.png'), 'image/png');
+  }
   if (pathname === '/web/style.css') {
     return serveFile(res, path.join(WEB_DIR, 'style.css'), 'text/css');
   }
