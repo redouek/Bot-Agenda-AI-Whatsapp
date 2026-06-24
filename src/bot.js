@@ -298,20 +298,39 @@ async function getRecentHistory(userId, chat, currentMessageId) {
   }
 }
 
+const PUPPETEER_TRANSIENT = /Execution context was destroyed|detached Frame|Target closed|Session closed|Protocol error/i;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function replyToMessage(userId, client, message, text) {
   if (!text) return;
   const CHAT_ID = await getAssistantChatId(userId);
   if (!CHAT_ID) return;
-  try {
-    trackBotSentBody(userId, text);
-    await client.sendMessage(CHAT_ID, text);
-  } catch (error) {
-    console.error('Falha ao enviar mensagem via sendMessage:', error?.message);
+  trackBotSentBody(userId, text);
+
+  const attempts = [0, 1500, 4000];
+  let lastErr = null;
+  for (let i = 0; i < attempts.length; i++) {
+    if (attempts[i] > 0) await sleep(attempts[i]);
     try {
-      await message.reply(text);
-    } catch (err2) {
-      console.error('Falha tambem no fallback reply:', err2?.message);
+      await client.sendMessage(CHAT_ID, text);
+      if (i > 0) console.log(`[bot:${userId}] sendMessage recuperou na tentativa ${i + 1}`);
+      return;
+    } catch (error) {
+      lastErr = error;
+      const transient = PUPPETEER_TRANSIENT.test(error?.message || '');
+      console.warn(`[bot:${userId}] sendMessage falhou (tentativa ${i + 1}/${attempts.length}, transient=${transient}):`, error?.message?.slice(0, 150));
+      if (!transient) break;
     }
+  }
+
+  try {
+    await message.reply(text);
+    console.log(`[bot:${userId}] fallback message.reply funcionou.`);
+  } catch (err2) {
+    console.error(`[bot:${userId}] Falha total — sendMessage e fallback reply:`, lastErr?.message?.slice(0, 150), '|', err2?.message?.slice(0, 150));
   }
 }
 

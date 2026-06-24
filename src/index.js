@@ -21,6 +21,26 @@ const { Client, LocalAuth } = pkg;
 
 const whatsappInstances = new Map();
 
+const PUPPETEER_RECOVERABLE = /Execution context was destroyed|detached Frame|Target closed|Session closed|Most likely the page has been closed/i;
+
+process.on('unhandledRejection', (reason) => {
+  const msg = reason?.message || String(reason);
+  if (PUPPETEER_RECOVERABLE.test(msg)) {
+    console.warn('[process] unhandledRejection recuperavel ignorada:', msg.slice(0, 200));
+    return;
+  }
+  console.error('[process] unhandledRejection NAO recuperavel:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  const msg = err?.message || String(err);
+  if (PUPPETEER_RECOVERABLE.test(msg)) {
+    console.warn('[process] uncaughtException recuperavel ignorada:', msg.slice(0, 200));
+    return;
+  }
+  console.error('[process] uncaughtException NAO recuperavel:', err);
+});
+
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 }
