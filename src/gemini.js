@@ -84,7 +84,7 @@ function normalizeEvent(event, fallbackText = '') {
 
   return {
     summary: event.summary,
-    description: event.description || fallbackText || event.summary,
+    description: event.description || '',
     startDateTime,
     endDateTime: new Date(endDateTime) > new Date(startDateTime)
       ? endDateTime
@@ -113,7 +113,7 @@ function fallbackScheduleProposal(text) {
     requiresConfirmation: true,
     event: {
       summary: summary || 'Evento do WhatsApp',
-      description: text,
+      description: '',
       startDateTime: dateParts.startDateTime,
       endDateTime: dateParts.endDateTime,
       location: '',

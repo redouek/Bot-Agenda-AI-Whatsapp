@@ -153,7 +153,7 @@ export async function createEvent(data, userId, calendarId) {
 
   const event = {
     summary: data.summary || 'Evento WhatsApp',
-    description: data.description || 'Criado pelo bot de WhatsApp',
+    description: data.description || '',
     start: { dateTime: data.startDateTime, timeZone },
     end: {
       dateTime: data.endDateTime || new Date(new Date(data.startDateTime).getTime() + 60 * 60 * 1000).toISOString(),
