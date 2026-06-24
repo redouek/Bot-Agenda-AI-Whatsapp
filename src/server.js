@@ -417,7 +417,6 @@ async function handleRequest(req, res, manager) {
 
     await updateUserSettings(user.id, {
       assistantChatId,
-      calendarId: body.GOOGLE_CALENDAR_ID || undefined,
       timezone: update.DEFAULT_TIMEZONE || undefined,
       footballApiKey: body.FOOTBALL_DATA_KEY !== undefined ? body.FOOTBALL_DATA_KEY : undefined,
     });

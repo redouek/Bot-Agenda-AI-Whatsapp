@@ -304,33 +304,63 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function waitForClientReady(client, timeoutMs = 25000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const state = await client.getState();
+      if (state === 'CONNECTED') return true;
+    } catch {}
+    await sleep(2000);
+  }
+  return false;
+}
+
 async function replyToMessage(userId, client, message, text) {
   if (!text) return;
   const CHAT_ID = await getAssistantChatId(userId);
   if (!CHAT_ID) return;
   trackBotSentBody(userId, text);
 
-  const attempts = [0, 1500, 4000];
+  try {
+    await client.sendMessage(CHAT_ID, text);
+    return;
+  } catch (firstErr) {
+    const transient = PUPPETEER_TRANSIENT.test(firstErr?.message || '');
+    if (!transient) {
+      console.warn(`[bot:${userId}] sendMessage falhou (erro nao-transient):`, firstErr?.message?.slice(0, 150));
+      try { await message.reply(text); return; } catch {}
+      console.error(`[bot:${userId}] Falha total sem ser transient.`);
+      return;
+    }
+    console.warn(`[bot:${userId}] sendMessage falhou (transient), aguardando WhatsApp Web reconectar...`);
+  }
+
+  const reconnected = await waitForClientReady(client);
+  if (!reconnected) {
+    console.error(`[bot:${userId}] WhatsApp Web nao reconectou em 25s. Mensagem perdida.`);
+    return;
+  }
+
+  const attempts = [500, 2000, 5000];
   let lastErr = null;
   for (let i = 0; i < attempts.length; i++) {
-    if (attempts[i] > 0) await sleep(attempts[i]);
+    await sleep(attempts[i]);
     try {
       await client.sendMessage(CHAT_ID, text);
-      if (i > 0) console.log(`[bot:${userId}] sendMessage recuperou na tentativa ${i + 1}`);
+      console.log(`[bot:${userId}] sendMessage recuperou apos reconnect (tentativa ${i + 1}).`);
       return;
     } catch (error) {
       lastErr = error;
-      const transient = PUPPETEER_TRANSIENT.test(error?.message || '');
-      console.warn(`[bot:${userId}] sendMessage falhou (tentativa ${i + 1}/${attempts.length}, transient=${transient}):`, error?.message?.slice(0, 150));
-      if (!transient) break;
+      console.warn(`[bot:${userId}] sendMessage pos-reconnect falhou (${i + 1}/${attempts.length}):`, error?.message?.slice(0, 120));
     }
   }
 
   try {
     await message.reply(text);
-    console.log(`[bot:${userId}] fallback message.reply funcionou.`);
+    console.log(`[bot:${userId}] fallback message.reply funcionou pos-reconnect.`);
   } catch (err2) {
-    console.error(`[bot:${userId}] Falha total — sendMessage e fallback reply:`, lastErr?.message?.slice(0, 150), '|', err2?.message?.slice(0, 150));
+    console.error(`[bot:${userId}] Falha total pos-reconnect:`, lastErr?.message?.slice(0, 150), '|', err2?.message?.slice(0, 150));
   }
 }
 
