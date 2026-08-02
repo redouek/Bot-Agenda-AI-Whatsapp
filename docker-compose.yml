@@ -14,6 +14,9 @@ services:
       - ./data:/data
     restart: unless-stopped
     shm_size: "1gb"
+    # Node como PID 1 nao faz reap de filhos: processos do Chromium que sobram
+    # viram zumbis e seguram RAM. O init do Docker recolhe.
+    init: true
 
   cloudflared:
     image: cloudflare/cloudflared:latest

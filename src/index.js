@@ -41,11 +41,41 @@ process.on('uncaughtException', (err) => {
   console.error('[process] uncaughtException NAO recuperavel:', err);
 });
 
+// Puppeteer aborta um comando CDP depois deste tempo. O default (180s) fazia o
+// painel ficar "carregando" varios minutos antes de mostrar erro.
+const PROTOCOL_TIMEOUT_MS = 90_000;
+// Se a inicializacao nao chegar nem a emitir QR neste prazo, e travamento.
+const INIT_TIMEOUT_MS = 90_000;
+
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 }
 
+// Um Chromium vivo mantem o SingletonLock do profile. Apagar o lock as cegas
+// deixa um SEGUNDO Chromium abrir o MESMO user-data-dir — profile corrompido e
+// processos multiplicando. So limpa quando ninguem esta usando o profile.
+function isProfileInUse(sessionPath) {
+  let pids;
+  try {
+    pids = fs.readdirSync('/proc');
+  } catch {
+    return false; // /proc indisponivel (ex: Windows) — mantem comportamento antigo
+  }
+  for (const pid of pids) {
+    if (!/^\d+$/.test(pid)) continue;
+    try {
+      const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+      if (cmdline.includes('--user-data-dir=') && cmdline.includes(sessionPath)) return true;
+    } catch { /* processo morreu ou sem permissao */ }
+  }
+  return false;
+}
+
 function clearChromiumLocks(sessionPath) {
+  if (isProfileInUse(sessionPath)) {
+    console.warn(`[index] Chromium ainda ativo em ${sessionPath}; preservando locks do profile.`);
+    return;
+  }
   try {
     if (!fs.existsSync(sessionPath)) return;
     const subdirs = fs.readdirSync(sessionPath, { withFileTypes: true })
@@ -64,6 +94,39 @@ function clearChromiumLocks(sessionPath) {
 
 function getExistingRuntime(userId) {
   return whatsappInstances.get(userId) || null;
+}
+
+// Fecha o browser de um runtime. Toda saida de startWhatsAppInstance que
+// descarta um client PRECISA passar por aqui — um client descartado sem destroy
+// deixa ~11 processos Chromium orfaos que so morrem junto com o container.
+async function destroyRuntime(runtime, reason) {
+  if (!runtime?.client) return;
+  try {
+    await runtime.client.destroy();
+    console.log(`[index] Client de ${runtime.userId} encerrado (${reason}).`);
+  } catch (error) {
+    console.warn(`[index] Falha ao encerrar client de ${runtime.userId} (${reason}):`, error?.message || error);
+  }
+}
+
+// initialize() pode ficar pendurado indefinidamente quando o Chromium sobe sem
+// recursos. O watchdog so dispara se nem o QR saiu — depois disso a demora e
+// legitima (o usuario ainda esta escaneando).
+async function initializeWithWatchdog(client, runtime, ms) {
+  let timer;
+  const watchdog = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      if (runtime.status !== 'initializing') return;
+      reject(new Error(`Inicializacao travada em 'initializing' apos ${Math.round(ms / 1000)}s`));
+    }, ms);
+    timer.unref?.();
+  });
+
+  try {
+    await Promise.race([client.initialize(), watchdog]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function isRunningStatus(status) {
@@ -98,6 +161,14 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     return existing;
   }
 
+  // Runtime existente porem parado (error/disconnected/auth_failure): o browser
+  // dele continua vivo. O whatsappInstances.set() mais abaixo sobrescreveria a
+  // entrada e a referencia ao client antigo se perderia para sempre.
+  if (existing) {
+    await destroyRuntime(existing, `substituindo instancia em '${existing.status}'`);
+    whatsappInstances.delete(user.id);
+  }
+
   const sessionPath = getWhatsAppSessionPath(user.id);
   ensureDir(sessionPath);
   clearChromiumLocks(sessionPath);
@@ -116,7 +187,16 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     authStrategy: new LocalAuth({ clientId: userIdToFolder(user.id), dataPath: sessionPath }),
     puppeteer: {
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      protocolTimeout: PROTOCOL_TIMEOUT_MS,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        // Sem isto cada aba em segundo plano segura RAM que nunca volta.
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+      ],
     },
   });
 
@@ -193,9 +273,14 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
   });
 
   try {
-    await client.initialize();
+    await initializeWithWatchdog(client, runtime, INIT_TIMEOUT_MS);
   } catch (error) {
     runtime.status = 'error';
+    // O destroy aqui e o que impede o vazamento: sem ele, cada tentativa de
+    // reconectar pelo painel deixava mais um Chromium vivo, ate a RAM do host
+    // acabar e o proximo initialize() estourar por timeout.
+    await destroyRuntime(runtime, 'falha na inicializacao');
+    whatsappInstances.delete(user.id);
     await updateWhatsAppSession(user.id, { status: 'error', latestQr: null, sessionPath });
     throw error;
   }
@@ -205,13 +290,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
 
 export async function stopWhatsAppInstance(userId = getDefaultUserId(), finalStatus = 'stopped') {
   const runtime = whatsappInstances.get(userId);
-  if (runtime?.client) {
-    try {
-      await runtime.client.destroy();
-    } catch (error) {
-      console.warn(`[index] Falha ao destruir client ${userId}:`, error?.message || error);
-    }
-  }
+  await destroyRuntime(runtime, `parada solicitada (${finalStatus})`);
 
   stopReminderLoop(userId);
   stopSelfChatPolling(userId);
@@ -233,8 +312,9 @@ export async function logoutWhatsAppInstance(userId = getDefaultUserId()) {
       await runtime.client.logout();
     } catch (error) {
       console.warn(`[index] Falha no logout ${userId}:`, error?.message || error);
-      try { await runtime.client.destroy(); } catch {}
     }
+    // logout() nao fecha o browser — sem destroy o Chromium fica orfao.
+    await destroyRuntime(runtime, 'logout');
   }
   stopReminderLoop(userId);
   stopSelfChatPolling(userId);

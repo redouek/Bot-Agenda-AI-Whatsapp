@@ -851,26 +851,45 @@ export function stopReminderLoop(userId) {
 // Acessa o store interno do WA via pupPage.evaluate() porque getChats() não expõe
 // o self-chat (Mensagens Salvas) no modo multi-device (@lid).
 export function startSelfChatPolling(userId, client) {
-  if (pollIntervals.has(userId)) return;
+  // Um 'ready' pode disparar mais de uma vez (whatsapp-web.js reinjeta apos
+  // reload interno do WhatsApp Web). Reinicia o polling em vez de sair na
+  // primeira chamada: o intervalo antigo ficaria preso a um lastSeenTs velho.
+  if (pollIntervals.has(userId)) stopSelfChatPolling(userId);
 
   // Comeca a partir do instante atual: ignora mensagens da janela offline anterior
   let lastSeenTs = sessionStartTimes.get(userId) || Date.now();
+  let lidWarnAt = 0;
 
   // Acessa o self-chat no modo multi-device.
   // O Mensagens Salvas usa o LID do próprio usuário como chat ID (não @c.us).
   // Descobrimos o LID dinamicamente a partir de qualquer mensagem fromMe.
   const fetchFromStore = async () => {
-    return client.pupPage.evaluate(async () => {
+    // Numa sessao recem-criada (QR novo) o Store.Msg comeca vazio, entao a
+    // descoberta por varredura falha. Passamos o LID ja persistido no banco
+    // como fallback — sem ele o polling ficava em silencio para sempre.
+    const knownLid = selfChatLidByUser.get(userId) || null;
+    return client.pupPage.evaluate(async (knownLid) => {
       try {
         const Store = window.Store;
         const allMsgs = Store.Msg?.getModelsArray?.() || [];
 
-        // Descobre o LID do próprio usuário a partir de uma fromMe message
-        const fromMeMsg = allMsgs.find(m => m.id?.fromMe && m.from?._serialized?.endsWith('@lid'));
-        const userLid = fromMeMsg?.from?._serialized;
+        // 1) Via API do proprio WA Web (funciona com store vazio)
+        let userLid = null;
+        try {
+          userLid = Store.User?.getMaybeMeLidUser?.()?._serialized || null;
+        } catch {}
+
+        // 2) Varredura por uma mensagem fromMe com remetente @lid
+        if (!userLid) {
+          const fromMeMsg = allMsgs.find(m => m.id?.fromMe && m.from?._serialized?.endsWith('@lid'));
+          userLid = fromMeMsg?.from?._serialized || null;
+        }
+
+        // 3) LID persistido no banco de uma sessao anterior
+        if (!userLid) userLid = knownLid;
 
         if (!userLid) {
-          return { error: 'LID do usuario nao encontrado em Store.Msg' };
+          return { error: 'LID do usuario nao encontrado (Store.User, Store.Msg e banco)' };
         }
 
         // Self-chat REAL: mensagens cujo remote === user LID
@@ -907,7 +926,7 @@ export function startSelfChatPolling(userId, client) {
       } catch (e) {
         return { error: e.message };
       }
-    });
+    }, knownLid);
   };
 
   const updateUserLid = (result) => {
@@ -928,6 +947,13 @@ export function startSelfChatPolling(userId, client) {
       const result = await fetchFromStore();
 
       if (!result?.chatId) {
+        // Nao retorna calado: sem isso um self-chat que nunca resolve o LID
+        // parece "conectado mas mudo". Loga no maximo 1x por minuto.
+        const now = Date.now();
+        if (now - lidWarnAt > 60000) {
+          lidWarnAt = now;
+          console.warn(`[poll:${userId}] Self-chat nao resolvido: ${result?.error || 'resposta vazia do Store'}`);
+        }
         return;
       }
 
