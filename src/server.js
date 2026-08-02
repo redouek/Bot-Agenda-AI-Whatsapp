@@ -107,7 +107,13 @@ async function buildHealthPayload(manager) {
     timestamp: new Date().toISOString(),
   };
 
-  return [payload, status === 'ok' ? 200 : 503];
+  // 503 so quando NINGUEM esta saudavel. 'degraded' vai como 200 com a flag
+  // no corpo, de proposito: uma conta abandonada (parou de usar e nunca
+  // reescaneou) ficaria eternamente em awaiting_qr e deixaria o alerta
+  // sempre vermelho. Alerta que vive aceso e alerta que se ignora.
+  // Trade-off assumido: com varios usuarios ativos, a queda de um so nao
+  // dispara o healthcheck — aparece como 'degraded' no card do HUB.
+  return [payload, status === 'down' ? 503 : 200];
 }
 
 function readBody(req) {
