@@ -13,6 +13,17 @@ const pollIntervals = new Map();
 const selfChatLidByUser = new Map();
 const sessionStartTimes = new Map();
 
+// Saude do polling do self-chat. Existe porque 'ready' nao prova que o bot
+// responde: em 24/06/2026 o status ficou 'ready' por semanas enquanto o
+// polling falhava em toda iteracao e nenhuma mensagem era lida.
+const pollHealthByUser = new Map();
+
+export function getSelfChatHealth(userId) {
+  const h = pollHealthByUser.get(userId);
+  if (!h) return { polling: false, lastOkAt: null, lastError: null, lastErrorAt: null };
+  return { polling: pollIntervals.has(userId), ...h };
+}
+
 export function setSessionStart(userId, ts = Date.now()) {
   sessionStartTimes.set(userId, ts);
   console.log(`[bot:${userId}] sessao iniciada em ${new Date(ts).toISOString()} — mensagens anteriores serao ignoradas.`);
@@ -958,12 +969,22 @@ export function startSelfChatPolling(userId, client) {
         // Nao retorna calado: sem isso um self-chat que nunca resolve o LID
         // parece "conectado mas mudo". Loga no maximo 1x por minuto.
         const now = Date.now();
+        const reason = result?.error || 'resposta vazia do Store';
+        const health = pollHealthByUser.get(userId) || {};
+        pollHealthByUser.set(userId, { ...health, lastError: reason, lastErrorAt: now });
         if (now - lidWarnAt > 60000) {
           lidWarnAt = now;
-          console.warn(`[poll:${userId}] Self-chat nao resolvido: ${result?.error || 'resposta vazia do Store'}`);
+          console.warn(`[poll:${userId}] Self-chat nao resolvido: ${reason}`);
         }
         return;
       }
+
+      // Resolveu: e o unico sinal confiavel de que o bot consegue mesmo ler
+      // o self-chat. O /api/health usa a idade deste timestamp.
+      pollHealthByUser.set(userId, {
+        ...(pollHealthByUser.get(userId) || {}),
+        lastOkAt: Date.now(),
+      });
 
       updateUserLid(result);
       const rawMessages = result.messages;
@@ -1049,4 +1070,5 @@ export function stopSelfChatPolling(userId) {
   if (!interval) return;
   clearInterval(interval);
   pollIntervals.delete(userId);
+  pollHealthByUser.delete(userId);
 }

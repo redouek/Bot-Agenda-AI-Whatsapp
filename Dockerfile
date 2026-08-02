@@ -37,4 +37,11 @@ COPY src/ ./src/
 COPY web/ ./web/
 
 EXPOSE 3000
+
+# /api/health responde 503 quando o bot nao esta realmente operante — inclusive
+# no caso em que o processo esta vivo e o WhatsApp conectado, mas o self-chat
+# nao esta sendo lido. start-period cobre a subida do Chromium e o scan do QR.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=180s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/health" >/dev/null || exit 1
+
 CMD ["node", "src/index.js"]

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import qrcode from 'qrcode';
 import { getConfig, setConfig, isPlatformConfigured } from './config.js';
 import { getAuthUrl, getLoginAuthUrl, exchangeCodeForLogin, exchangeCodeForTokens, listCalendars } from './calendar.js';
+import { getSelfChatHealth } from './bot.js';
 import {
   countAdmins,
   ensureUser,
@@ -52,6 +53,61 @@ function serveFile(res, filePath, contentType) {
 function json(res, data, status = 200, headers = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
   res.end(JSON.stringify(data));
+}
+
+// O polling do self-chat roda a cada 4s; sem sucesso por este tempo, algo
+// quebrou mesmo que o status siga 'ready'.
+const POLL_STALE_MS = 150_000;
+
+// Monta a resposta do /api/health. Devolve [payload, httpStatus] para que o
+// HEALTHCHECK do Docker possa decidir so pelo codigo HTTP.
+async function buildHealthPayload(manager) {
+  const users = await listUsers();
+  const now = Date.now();
+
+  // So conta quem concluiu o onboarding e nao foi pausado de proposito:
+  // usuario sem telefone nao e falha, e 'paused' e decisao do usuario.
+  const monitored = [];
+  for (const user of users) {
+    if (!user.assistant_chat_id) continue;
+    const session = await getWhatsAppSession(user.id);
+    if (session?.status === 'paused') continue;
+
+    const runtime = await manager.getWhatsAppStatus(user.id);
+    const poll = getSelfChatHealth(user.id);
+    monitored.push({
+      status: runtime.status,
+      ready: runtime.status === 'ready',
+      selfChatOk: !!poll.lastOkAt && (now - poll.lastOkAt) < POLL_STALE_MS,
+      lastPollError: poll.lastError || null,
+    });
+  }
+
+  const total = monitored.length;
+  const ready = monitored.filter(u => u.ready).length;
+  // 'ready' sozinho nao basta: era exatamente esse o estado do bot enquanto
+  // ele nao respondia nada. So conta como saudavel quem tambem esta lendo
+  // o self-chat.
+  const healthy = monitored.filter(u => u.ready && u.selfChatOk).length;
+
+  let status;
+  if (total === 0 || healthy === total) status = 'ok';
+  else if (ready > 0) status = 'degraded';
+  else status = 'down';
+
+  const payload = {
+    status,
+    usersMonitored: total,
+    usersReady: ready,
+    usersHealthy: healthy,
+    botStatuses: monitored.map(u => u.status),
+    selfChatStale: monitored.some(u => u.ready && !u.selfChatOk),
+    lastPollError: monitored.find(u => u.lastPollError)?.lastPollError || null,
+    uptimeSec: Math.round(process.uptime()),
+    timestamp: new Date().toISOString(),
+  };
+
+  return [payload, status === 'ok' ? 200 : 503];
 }
 
 function readBody(req) {
@@ -275,6 +331,18 @@ async function fetchGeminiModels(apiKey) {
 async function handleRequest(req, res, manager) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
+
+  // ---------- Healthcheck (publico, sem PII) ----------
+  // Consumido pelo HEALTHCHECK do Docker e pelo status-server do HUB.
+  // Deliberadamente sem autenticacao e sem dado pessoal: nada de e-mail,
+  // telefone ou caminho de sessao. So contagens agregadas.
+  //
+  // Motivo de existir: 'container running' nao significa 'bot funcionando'.
+  // Em 24/06/2026 o processo ficou de pe por semanas com o bot mudo, e o
+  // monitoramento por liveness reportou tudo saudavel o tempo todo.
+  if (pathname === '/api/health' && req.method === 'GET') {
+    return json(res, ...(await buildHealthPayload(manager)));
+  }
 
   // ---------- Paginas HTML/JS/CSS (publicas) ----------
   if (pathname === '/') {
