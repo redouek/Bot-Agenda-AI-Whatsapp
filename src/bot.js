@@ -850,6 +850,14 @@ export function stopReminderLoop(userId) {
 // em modo multi-device do whatsapp-web.js.
 // Acessa o store interno do WA via pupPage.evaluate() porque getChats() não expõe
 // o self-chat (Mensagens Salvas) no modo multi-device (@lid).
+//
+// ATENCAO — acoplamento de versao: depende de `window.Store`, que e um interno
+// injetado pelo ExposeStore da whatsapp-web.js, nao API publica. A 1.34.7
+// removeu esse arquivo e `window.Store` virou undefined; o polling passou a
+// falhar em silencio e o bot conectava sem responder. Por isso a lib esta
+// pinada em 1.34.6 (exata) no package.json e o Dockerfile usa `npm ci`.
+// Antes de subir a versao, confirmar que src/util/Injected/Store.js ainda
+// existe na lib — se nao existir, este bloco precisa ser reescrito.
 export function startSelfChatPolling(userId, client) {
   // Um 'ready' pode disparar mais de uma vez (whatsapp-web.js reinjeta apos
   // reload interno do WhatsApp Web). Reinicia o polling em vez de sair na

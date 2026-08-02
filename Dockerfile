@@ -6,8 +6,12 @@ RUN apt-get update \
     python3 \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm_config_build_from_source=true npm install --omit=dev
+COPY package.json package-lock.json ./
+# npm ci, nunca npm install: o install ignora o lock e resolve o range do
+# package.json na hora do build. Foi assim que a whatsapp-web.js pulou de
+# 1.34.6 para 1.34.7 num rebuild — a 1.34.7 removeu o window.Store de que o
+# polling do self-chat depende, e o bot passou a conectar sem responder.
+RUN npm_config_build_from_source=true npm ci --omit=dev
 
 # Stage 2: imagem de produção — sem ferramentas de build
 FROM node:20-slim
