@@ -599,7 +599,11 @@ async function handlePendingChooseAll(userId, client, message, chatId) {
   return true;
 }
 
-export async function processIncomingMessage(userId, client, message) {
+// `source` identifica por onde a mensagem chegou: 'event:message_create',
+// 'event:message' ou 'poll'. Serve para decidir se o polling do self-chat
+// (workaround acoplado a interno da lib) ainda e necessario — se o evento
+// vencer o dedup de forma consistente, o polling e redundante.
+export async function processIncomingMessage(userId, client, message, source = 'desconhecido') {
   // Verifica self-chat ANTES do dedup (evita adicionar ID e bloquear polling depois)
   let chat;
   try {
@@ -625,7 +629,13 @@ export async function processIncomingMessage(userId, client, message) {
   // Normaliza para CHAT_ID em todos os usos downstream (pendingActions, replies, etc.)
   const chatId = CHAT_ID;
 
-  if (trackProcessedMessage(userId, message)) return;
+  if (trackProcessedMessage(userId, message)) {
+    // Duplicata: outra origem chegou primeiro. Registrar o perdedor e o que
+    // revela se o message_create dispara no self-chat — sem isso so se ve
+    // quem venceu, e um evento que dispara mas perde a corrida some do log.
+    console.log(`[bot:${userId}] Duplicata ignorada (source=${source}).`);
+    return;
+  }
 
   if (message.fromMe && message.body && botSentBodies.has(userScopedKey(userId, message.body))) {
     botSentBodies.delete(userScopedKey(userId, message.body));
@@ -633,7 +643,7 @@ export async function processIncomingMessage(userId, client, message) {
   }
 
   const body = message.body || '';
-  console.log(`[bot:${userId}] Mensagem recebida:`, { chatId, body: body.slice(0, 80) });
+  console.log(`[bot:${userId}] Mensagem recebida:`, { chatId, source, body: body.slice(0, 80) });
 
   // Se ha uma lista pendente de escolha e o user respondeu so um numero, processa selecao
   const choiceIdx = detectNumericChoice(body);
@@ -1017,7 +1027,7 @@ export function startSelfChatPolling(userId, client) {
                   };
                 }
               };
-              await processIncomingMessage(userId, client, realMessage);
+              await processIncomingMessage(userId, client, realMessage, 'poll');
               continue;
             }
             console.warn(`[poll:${userId}] getMessageById retornou null para ${raw.id}, fazendo fallback`);
@@ -1049,7 +1059,7 @@ export function startSelfChatPolling(userId, client) {
           reply: async (text) => client.sendMessage(CHAT_ID, text),
         };
 
-        await processIncomingMessage(userId, client, syntheticMessage);
+        await processIncomingMessage(userId, client, syntheticMessage, 'poll');
       }
 
       if (rawMessages.length > 0) {

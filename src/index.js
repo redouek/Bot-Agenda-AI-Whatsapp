@@ -268,7 +268,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
 
   client.on('message', async message => {
     try {
-      await processIncomingMessage(user.id, client, message);
+      await processIncomingMessage(user.id, client, message, 'event:message');
     } catch (error) {
       console.error(`[bot:${user.id}] Erro no fluxo de message:`, error);
     }
@@ -276,7 +276,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
 
   client.on('message_create', async message => {
     try {
-      await processIncomingMessage(user.id, client, message);
+      await processIncomingMessage(user.id, client, message, 'event:message_create');
     } catch (error) {
       console.error(`[bot:${user.id}] Erro no fluxo de message_create:`, error);
     }
