@@ -872,13 +872,21 @@ export function stopReminderLoop(userId) {
 // Acessa o store interno do WA via pupPage.evaluate() porque getChats() não expõe
 // o self-chat (Mensagens Salvas) no modo multi-device (@lid).
 //
-// ATENCAO — acoplamento de versao: depende de `window.Store`, que e um interno
-// injetado pelo ExposeStore da whatsapp-web.js, nao API publica. A 1.34.7
-// removeu esse arquivo e `window.Store` virou undefined; o polling passou a
-// falhar em silencio e o bot conectava sem responder. Por isso a lib esta
-// pinada em 1.34.6 (exata) no package.json e o Dockerfile usa `npm ci`.
-// Antes de subir a versao, confirmar que src/util/Injected/Store.js ainda
-// existe na lib — se nao existir, este bloco precisa ser reescrito.
+// ATENCAO — acoplamento com internos: le o store de mensagens do WhatsApp Web
+// diretamente, nao por API publica da lib. Ha dois caminhos possiveis e o
+// codigo tenta ambos:
+//   ate 1.34.6: `window.Store`, que a lib montava via moduleRaid (ExposeStore)
+//   a partir de 1.34.7: `window.require('WAWebCollections')`, o carregador de
+//                       modulos do proprio WhatsApp Web, que a lib tambem usa
+// A 1.34.7 apagou o ExposeStore; quem dependia so de `window.Store` passou a
+// falhar em silencio (bot conectava e nao respondia). Depender do que o
+// upstream mantem, em vez do que ele apagou, e o que da alguma margem aqui.
+//
+// Este polling existe porque `message_create` NAO dispara no self-chat em
+// multi-device — confirmado por instrumentacao em 03/08/2026, com zero eventos
+// registrados contra duas mensagens lidas pelo polling. Nao remover sem
+// refazer esse teste (o campo `source` do log mostra a origem de cada
+// mensagem processada).
 export function startSelfChatPolling(userId, client) {
   // Um 'ready' pode disparar mais de uma vez (whatsapp-web.js reinjeta apos
   // reload interno do WhatsApp Web). Reinicia o polling em vez de sair na
@@ -899,13 +907,30 @@ export function startSelfChatPolling(userId, client) {
     const knownLid = selfChatLidByUser.get(userId) || null;
     return client.pupPage.evaluate(async (knownLid) => {
       try {
-        const Store = window.Store;
-        const allMsgs = Store.Msg?.getModelsArray?.() || [];
+        // A 1.34.7 removeu o window.Store (que a lib montava via moduleRaid) e
+        // passou a usar o carregador de modulos do proprio WhatsApp Web.
+        // Resolver as duas formas deixa este bloco independente da versao da
+        // lib: subir ou descer de versao nao exige mexer aqui.
+        const load = (name) => {
+          try { return typeof window.require === 'function' ? window.require(name) : null; }
+          catch { return null; }
+        };
+        const collections = load('WAWebCollections');
+        const MsgStore = window.Store?.Msg || collections?.Msg || null;
+        const ChatStore = window.Store?.Chat || collections?.Chat || null;
+        const WidFactory = window.Store?.WidFactory || load('WAWebWidFactory');
+        const MeUser = window.Store?.User || load('WAWebUserPrefsMeUser');
+
+        if (!MsgStore) {
+          return { error: 'store de mensagens indisponivel (window.Store e WAWebCollections falharam)' };
+        }
+
+        const allMsgs = MsgStore.getModelsArray?.() || [];
 
         // 1) Via API do proprio WA Web (funciona com store vazio)
         let userLid = null;
         try {
-          userLid = Store.User?.getMaybeMeLidUser?.()?._serialized || null;
+          userLid = MeUser?.getMaybeMeLidUser?.()?._serialized || null;
         } catch {}
 
         // 2) Varredura por uma mensagem fromMe com remetente @lid
@@ -918,17 +943,17 @@ export function startSelfChatPolling(userId, client) {
         if (!userLid) userLid = knownLid;
 
         if (!userLid) {
-          return { error: 'LID do usuario nao encontrado (Store.User, Store.Msg e banco)' };
+          return { error: 'LID do usuario nao encontrado (MeUser, store de mensagens e banco)' };
         }
 
         // Self-chat REAL: mensagens cujo remote === user LID
         const selfChatMsgs = allMsgs.filter(m => m.id?.remote?._serialized === userLid);
 
-        // Tenta achar o chat via Chat.find com o LID
+        // Tenta achar o chat pelo LID
         let chat = null;
         try {
-          const wid = Store.WidFactory.createWid(userLid);
-          chat = await Store.Chat.find(wid);
+          const wid = WidFactory.createWid(userLid);
+          chat = await ChatStore.find(wid);
         } catch {}
 
         const chatMsgs = chat?.msgs?.getModelsArray?.() || [];
