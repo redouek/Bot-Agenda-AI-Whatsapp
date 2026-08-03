@@ -133,6 +133,16 @@ function isRunningStatus(status) {
   return ['initializing', 'awaiting_qr', 'authenticated', 'ready'].includes(status);
 }
 
+// Quantos clients deveriam ter um Chromium vivo agora. O /api/health compara
+// com os browsers realmente em execucao: sobra e vazamento.
+export function getActiveInstanceCount() {
+  let count = 0;
+  for (const runtime of whatsappInstances.values()) {
+    if (isRunningStatus(runtime.status)) count += 1;
+  }
+  return count;
+}
+
 export async function getOrCreateCurrentUser(userId = getDefaultUserId()) {
   return ensureUser({
     id: userId,
@@ -384,6 +394,7 @@ async function main() {
   startServer(PORT, {
     getOrCreateCurrentUser,
     getWhatsAppStatus,
+    getActiveInstanceCount,
     startWhatsAppInstance,
     stopWhatsAppInstance,
     pauseWhatsAppInstance,

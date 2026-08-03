@@ -21,6 +21,7 @@ import {
   setUserAdmin,
   updateUserSettings,
   getWhatsAppSession,
+  getWhatsAppSessionPath,
 } from './database.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,9 +60,119 @@ function json(res, data, status = 200, headers = {}) {
 // quebrou mesmo que o status siga 'ready'.
 const POLL_STALE_MS = 150_000;
 
+// Piso de RAM livre no host. Abaixo disso o Chromium comeca a falhar ao
+// injetar scripts e a plataforma trava para todo mundo.
+const LOW_MEMORY_MB = 500;
+
+// Conta apenas processos-raiz do Chromium (um por instancia). Renderers, GPU e
+// zygotes carregam --type= e sao filhos; contar todos daria numero inutil.
+function countChromiumBrowsers() {
+  let pids;
+  try {
+    pids = fs.readdirSync('/proc');
+  } catch {
+    return null; // fora do Linux — checagem indisponivel, nao e falha
+  }
+  let count = 0;
+  for (const pid of pids) {
+    if (!/^\d+$/.test(pid)) continue;
+    try {
+      const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+      if (cmdline.includes('--user-data-dir=') && !cmdline.includes('--type=')) count += 1;
+    } catch { /* processo terminou ou sem permissao */ }
+  }
+  return count;
+}
+
+function readMemoryMb() {
+  try {
+    const info = fs.readFileSync('/proc/meminfo', 'utf8');
+    const grab = (key) => {
+      const m = info.match(new RegExp(`^${key}:\\s+(\\d+) kB`, 'm'));
+      return m ? Math.round(parseInt(m[1], 10) / 1024) : null;
+    };
+    return { availableMb: grab('MemAvailable'), totalMb: grab('MemTotal') };
+  } catch {
+    return { availableMb: null, totalMb: null };
+  }
+}
+
+// Checagens de plataforma — respondem "o servico esta no ar e capaz de
+// atender", independente de quantos usuarios existem. Falha aqui afeta todo
+// mundo de uma vez; por isso e o que define o status global.
+async function runPlatformChecks(manager) {
+  const checks = {};
+
+  // Banco: se listUsers() falha, nada funciona.
+  try {
+    await listUsers();
+    checks.database = { ok: true };
+  } catch (error) {
+    checks.database = { ok: false, detail: error?.message || 'falha ao ler o banco' };
+  }
+
+  // Credenciais da plataforma (Gemini + OAuth). Sem elas o bot sobe mas nao
+  // consegue interpretar mensagem nem falar com a agenda.
+  const config = getConfig();
+  const missing = [];
+  if (!config.GOOGLE_API_KEY) missing.push('GOOGLE_API_KEY');
+  if (!config.GOOGLE_OAUTH_CLIENT_ID) missing.push('GOOGLE_OAUTH_CLIENT_ID');
+  if (!config.GOOGLE_OAUTH_CLIENT_SECRET) missing.push('GOOGLE_OAUTH_CLIENT_SECRET');
+  checks.config = missing.length
+    ? { ok: false, detail: `faltando: ${missing.join(', ')}` }
+    : { ok: true };
+
+  // Diretorio de sessoes precisa aceitar escrita, senao nenhum login persiste.
+  const sessionsRoot = path.dirname(getWhatsAppSessionPath(getDefaultUserId()));
+  try {
+    fs.accessSync(sessionsRoot, fs.constants.W_OK);
+    checks.sessionsDir = { ok: true, path: sessionsRoot };
+  } catch {
+    checks.sessionsDir = { ok: false, path: sessionsRoot, detail: 'sem permissao de escrita' };
+  }
+
+  // Vazamento de Chromium — o modo de falha que derrubou a plataforma inteira
+  // em 2026: browsers orfaos consumindo a RAM ate nenhuma instancia subir.
+  const browsers = countChromiumBrowsers();
+  const expected = typeof manager.getActiveInstanceCount === 'function'
+    ? manager.getActiveInstanceCount()
+    : null;
+  if (browsers === null || expected === null) {
+    checks.chromium = { ok: true, detail: 'checagem indisponivel neste host' };
+  } else {
+    // Tolera 1 a mais: durante troca de instancia dois browsers coexistem
+    // por instantes sem que isso seja vazamento.
+    const leaked = Math.max(0, browsers - expected - 1);
+    checks.chromium = leaked > 0
+      ? { ok: false, browsers, expected, leaked, detail: `${leaked} browser(s) orfao(s)` }
+      : { ok: true, browsers, expected };
+  }
+
+  const { availableMb, totalMb } = readMemoryMb();
+  checks.memory = availableMb === null
+    ? { ok: true, detail: 'checagem indisponivel neste host' }
+    : { ok: availableMb >= LOW_MEMORY_MB, availableMb, totalMb };
+
+  return checks;
+}
+
 // Monta a resposta do /api/health. Devolve [payload, httpStatus] para que o
 // HEALTHCHECK do Docker possa decidir so pelo codigo HTTP.
+//
+// O status GLOBAL vem das checagens de plataforma (banco, credenciais, disco,
+// Chromium, memoria) — o que afeta todos os usuarios de uma vez. O bloco
+// `users` e detalhamento: util para diagnosticar, mas a queda de uma conta
+// isolada nao derruba o veredito da plataforma.
 async function buildHealthPayload(manager) {
+  const checks = await runPlatformChecks(manager);
+
+  // Sem banco ou sem disco de sessao nao ha servico para ninguem.
+  const hardDown = !checks.database.ok || !checks.sessionsDir.ok;
+  const softIssues = [];
+  for (const [name, check] of Object.entries(checks)) {
+    if (!check.ok && name !== 'database' && name !== 'sessionsDir') softIssues.push(name);
+  }
+
   const users = await listUsers();
   const now = Date.now();
 
@@ -90,29 +201,49 @@ async function buildHealthPayload(manager) {
   // o self-chat.
   const healthy = monitored.filter(u => u.ready && u.selfChatOk).length;
 
+  // Todo mundo que deveria estar atendendo esta fora: mesmo com as checagens
+  // de plataforma passando, na pratica o servico nao entrega nada.
+  const allUsersDown = total > 0 && healthy === 0;
+
   let status;
-  if (total === 0 || healthy === total) status = 'ok';
-  else if (ready > 0) status = 'degraded';
-  else status = 'down';
+  if (hardDown || allUsersDown) status = 'down';
+  else if (softIssues.length || healthy < total) status = 'degraded';
+  else status = 'ok';
+
+  const reasons = [];
+  if (!checks.database.ok) reasons.push('banco inacessivel');
+  if (!checks.sessionsDir.ok) reasons.push('diretorio de sessoes sem escrita');
+  if (!checks.config.ok) reasons.push('credenciais incompletas');
+  if (!checks.chromium.ok) reasons.push(`vazamento de Chromium (${checks.chromium.leaked})`);
+  if (!checks.memory.ok) reasons.push(`memoria baixa (${checks.memory.availableMb} MB)`);
+  if (allUsersDown) reasons.push('nenhum usuario operante');
+  else if (healthy < total) reasons.push(`${total - healthy} de ${total} usuario(s) fora`);
 
   const payload = {
     status,
-    usersMonitored: total,
-    usersReady: ready,
-    usersHealthy: healthy,
-    botStatuses: monitored.map(u => u.status),
-    selfChatStale: monitored.some(u => u.ready && !u.selfChatOk),
-    lastPollError: monitored.find(u => u.lastPollError)?.lastPollError || null,
-    uptimeSec: Math.round(process.uptime()),
+    reasons,
+    service: {
+      uptimeSec: Math.round(process.uptime()),
+      nodeVersion: process.version,
+      startedAt: new Date(now - process.uptime() * 1000).toISOString(),
+    },
+    checks,
+    users: {
+      monitored: total,
+      ready,
+      healthy,
+      statuses: monitored.map(u => u.status),
+      selfChatStale: monitored.some(u => u.ready && !u.selfChatOk),
+      lastPollError: monitored.find(u => u.lastPollError)?.lastPollError || null,
+    },
     timestamp: new Date().toISOString(),
   };
 
-  // 503 so quando NINGUEM esta saudavel. 'degraded' vai como 200 com a flag
-  // no corpo, de proposito: uma conta abandonada (parou de usar e nunca
-  // reescaneou) ficaria eternamente em awaiting_qr e deixaria o alerta
-  // sempre vermelho. Alerta que vive aceso e alerta que se ignora.
-  // Trade-off assumido: com varios usuarios ativos, a queda de um so nao
-  // dispara o healthcheck — aparece como 'degraded' no card do HUB.
+  // 503 apenas em 'down' — falha de plataforma ou ninguem sendo atendido.
+  // 'degraded' vai como 200 com o motivo no corpo, de proposito: uma conta
+  // abandonada (parou de usar e nunca reescaneou) ficaria eternamente em
+  // awaiting_qr e deixaria o alerta sempre vermelho. Alerta que vive aceso
+  // e alerta que se ignora.
   return [payload, status === 'down' ? 503 : 200];
 }
 
