@@ -64,6 +64,17 @@ const POLL_STALE_MS = 150_000;
 // injetar scripts e a plataforma trava para todo mundo.
 const LOW_MEMORY_MB = 500;
 
+// Quem pode ver o /api/health detalhado. Requisicao vinda pelo tunnel chega
+// com o IP do container do cloudflared, nunca loopback — entao "veio da rede
+// privada" NAO serve como prova de confianca aqui.
+function isTrustedHealthRequest(req) {
+  const token = process.env.HEALTH_TOKEN || '';
+  if (token && req.headers['x-health-token'] === token) return true;
+
+  const addr = req.socket?.remoteAddress || '';
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+
 // Conta apenas processos-raiz do Chromium (um por instancia). Renderers, GPU e
 // zygotes carregam --type= e sao filhos; contar todos daria numero inutil.
 function countChromiumBrowsers() {
@@ -478,7 +489,15 @@ async function handleRequest(req, res, manager) {
   // Em 24/06/2026 o processo ficou de pe por semanas com o bot mudo, e o
   // monitoramento por liveness reportou tudo saudavel o tempo todo.
   if (pathname === '/api/health' && req.method === 'GET') {
-    return json(res, ...(await buildHealthPayload(manager)));
+    const [payload, httpStatus] = await buildHealthPayload(manager);
+    // Publico recebe so o veredito. O detalhe (versao do Node, caminhos,
+    // memoria do host, contagem de usuarios) vaza superficie de ataque e o
+    // endpoint esta exposto na internet pelo tunnel — entao so sai para
+    // loopback (o HEALTHCHECK do container) ou com token.
+    if (!isTrustedHealthRequest(req)) {
+      return json(res, { status: payload.status, timestamp: payload.timestamp }, httpStatus);
+    }
+    return json(res, payload, httpStatus);
   }
 
   // ---------- Paginas HTML/JS/CSS (publicas) ----------
