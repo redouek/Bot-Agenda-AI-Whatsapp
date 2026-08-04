@@ -1066,6 +1066,18 @@ export function startSelfChatPolling(userId, client) {
               if (usedId !== raw.id) {
                 console.log(`[poll:${userId}] Midia resolvida pelo id alternativo: ${usedId}`);
               }
+              // downloadMedia() usa this.id._serialized para reencontrar a
+              // mensagem na pagina. Se o model veio sem esse campo, o download
+              // falha com erro minificado — entao preenche com o id que
+              // comprovadamente resolveu.
+              if (realMessage.id && !realMessage.id._serialized) {
+                realMessage.id._serialized = usedId;
+                console.log(`[poll:${userId}] Message.id._serialized ausente; preenchido com ${usedId}`);
+              }
+              console.log(
+                `[poll:${userId}] Midia pronta: type=${realMessage.type} hasMedia=${realMessage.hasMedia} ` +
+                `id=${realMessage.id?._serialized || 'AUSENTE'}`
+              );
               // Patch getChat para devolver o CHAT_ID do banco (evita o problema @lid vs @c.us)
               const origGetChat = realMessage.getChat?.bind(realMessage);
               realMessage.getChat = async () => {

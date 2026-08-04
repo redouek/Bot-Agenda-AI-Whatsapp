@@ -203,8 +203,26 @@ export function friendlyAiError(error) {
 async function downloadInlinePart(message) {
   if (!message?.hasMedia) return null;
 
-  const media = await message.downloadMedia();
-  if (!media?.mimetype || !media?.data) return null;
+  // downloadMedia() re-resolve a mensagem no contexto da pagina usando
+  // this.id._serialized. Quando esse id nao bate, o erro que sobe e minificado
+  // (ex: "r") e, sem este catch, derrubava o turno inteiro — o usuario recebia
+  // "Nao consegui processar sua mensagem" em vez de uma resposta ao conteudo.
+  let media;
+  try {
+    media = await message.downloadMedia();
+  } catch (error) {
+    console.error(
+      '[gemini] downloadMedia falhou:', error?.message,
+      '| id:', message?.id?._serialized || 'AUSENTE',
+      '| type:', message?.type
+    );
+    return null;
+  }
+
+  if (!media?.mimetype || !media?.data) {
+    console.warn('[gemini] downloadMedia sem conteudo utilizavel | type:', message?.type);
+    return null;
+  }
 
   return {
     inlineData: {
