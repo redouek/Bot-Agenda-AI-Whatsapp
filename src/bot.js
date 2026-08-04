@@ -968,14 +968,26 @@ export function startSelfChatPolling(userId, client) {
           chatMsgsCount: chatMsgs.length,
           selfChatMsgsInStore: selfChatMsgs.length,
           totalStoreMsgs: allMsgs.length,
-          messages: recent.map(m => ({
-            id: m.id?._serialized || '',
-            body: m.body || '',
-            timestamp: m.t || 0,
-            fromMe: m.id?.fromMe ?? false,
-            type: m.type || 'chat',
-            hasMedia: !!(m.mediaData || m.isMedia || (m.type && ['audio', 'ptt', 'image', 'video', 'document', 'sticker'].includes(m.type))),
-          })),
+          messages: recent.map(m => {
+            // getMessageById() resolve via Msg.get(id) e, se falhar, exige que
+            // o id tenha 3 ou 4 partes separadas por '_'. `_serialized` nem
+            // sempre esta presente — devolvemos tambem o toString() do MsgKey
+            // e sinalizamos qual forma o proprio store reconhece.
+            const serialized = m.id?._serialized || '';
+            let asString = '';
+            try { asString = typeof m.id?.toString === 'function' ? m.id.toString() : ''; } catch {}
+            return {
+              id: serialized || asString,
+              idAlt: asString && asString !== serialized ? asString : '',
+              idInStore: !!(serialized && MsgStore.get?.(serialized))
+                || !!(asString && MsgStore.get?.(asString)),
+              body: m.body || '',
+              timestamp: m.t || 0,
+              fromMe: m.id?.fromMe ?? false,
+              type: m.type || 'chat',
+              hasMedia: !!(m.mediaData || m.isMedia || (m.type && ['audio', 'ptt', 'image', 'video', 'document', 'sticker'].includes(m.type))),
+            };
+          }),
         };
       } catch (e) {
         return { error: e.message };
@@ -1035,8 +1047,25 @@ export function startSelfChatPolling(userId, client) {
         // O objeto sintético não tem isso, então busca o Message real via getMessageById.
         if (raw.hasMedia) {
           try {
-            const realMessage = await client.getMessageById(raw.id);
+            // Tenta as formas conhecidas do id: `_serialized` e o toString() do
+            // MsgKey. Uma delas pode nao existir dependendo da versao da lib, e
+            // getMessageById rejeita id malformado com "Invalid serialized
+            // message id specified" — que caia no sintetico sem midia.
+            const candidates = [raw.id, raw.idAlt].filter(Boolean);
+            let realMessage = null;
+            let usedId = null;
+            for (const candidate of candidates) {
+              try {
+                realMessage = await client.getMessageById(candidate);
+                if (realMessage) { usedId = candidate; break; }
+              } catch (err) {
+                console.warn(`[poll:${userId}] getMessageById rejeitou id="${candidate}" (${err?.message}).`);
+              }
+            }
             if (realMessage) {
+              if (usedId !== raw.id) {
+                console.log(`[poll:${userId}] Midia resolvida pelo id alternativo: ${usedId}`);
+              }
               // Patch getChat para devolver o CHAT_ID do banco (evita o problema @lid vs @c.us)
               const origGetChat = realMessage.getChat?.bind(realMessage);
               realMessage.getChat = async () => {
@@ -1055,9 +1084,15 @@ export function startSelfChatPolling(userId, client) {
               await processIncomingMessage(userId, client, realMessage, 'poll');
               continue;
             }
-            console.warn(`[poll:${userId}] getMessageById retornou null para ${raw.id}, fazendo fallback`);
+            // Chegou aqui: nenhuma forma do id resolveu. A midia sera perdida —
+            // o sintetico nao tem downloadMedia — entao registra o diagnostico
+            // completo em vez de so dizer que falhou.
+            console.warn(
+              `[poll:${userId}] Midia NAO resolvida. id="${raw.id}" idAlt="${raw.idAlt || '-'}" ` +
+              `partes=${String(raw.id).split('_').length} idInStore=${raw.idInStore} type=${raw.type}`
+            );
           } catch (err) {
-            console.warn(`[poll:${userId}] getMessageById falhou (${err?.message}), fazendo fallback synthetic`);
+            console.warn(`[poll:${userId}] Falha inesperada ao resolver midia (${err?.message}), fazendo fallback synthetic`);
           }
         }
 
