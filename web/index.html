@@ -233,10 +233,15 @@
         </div>
         <div class="status-grid">
           <div id="status-whatsapp" class="status-item ok"><span class="status-icon" id="whatsapp-icon">OK</span><span id="whatsapp-label">WhatsApp conectado</span></div>
+          <p id="whatsapp-detail" class="status-item-detail hidden"></p>
           <div id="status-calendar" class="status-item"><span class="status-icon" id="calendar-icon">...</span><span id="calendar-label">Verificando Google Calendar...</span></div>
         </div>
 
         <div class="account-actions">
+          <button class="btn-secondary action-card hidden" type="button" id="btn-restart">
+            <span class="action-title">Reiniciar bot</span>
+            <span class="action-sub">Reconecta o WhatsApp sem perder a sessao (sem novo QR). Use se o bot parar de responder.</span>
+          </button>
           <button class="btn-secondary action-card" type="button" id="btn-pause">
             <span class="action-title">Pausar bot</span>
             <span class="action-sub">Bot para de responder. Pode retomar a qualquer momento.</span>

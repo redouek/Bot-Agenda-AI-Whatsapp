@@ -887,7 +887,17 @@ export function stopReminderLoop(userId) {
 // registrados contra duas mensagens lidas pelo polling. Nao remover sem
 // refazer esse teste (o campo `source` do log mostra a origem de cada
 // mensagem processada).
-export function startSelfChatPolling(userId, client) {
+// Auto-heal: quanto tempo sem sucesso ate acionar um restart automatico do
+// client. Existe porque o usuario pode estar longe de qualquer terminal (ex:
+// no celular, fora de casa) quando o polling quebra — sem isso, so um humano
+// com acesso ao servidor destrava o bot. Limitado por cooldown e por um teto
+// de tentativas por sessao: se o restart nao resolve, restart repetido so
+// mascara um problema real (ex: credencial revogada) atras de um loop mudo.
+const AUTO_HEAL_AFTER_MS = 120_000;
+const AUTO_HEAL_COOLDOWN_MS = 10 * 60 * 1000;
+const AUTO_HEAL_MAX_ATTEMPTS = 3;
+
+export function startSelfChatPolling(userId, client, { onUnhealthy } = {}) {
   // Um 'ready' pode disparar mais de uma vez (whatsapp-web.js reinjeta apos
   // reload interno do WhatsApp Web). Reinicia o polling em vez de sair na
   // primeira chamada: o intervalo antigo ficaria preso a um lastSeenTs velho.
@@ -896,6 +906,9 @@ export function startSelfChatPolling(userId, client) {
   // Comeca a partir do instante atual: ignora mensagens da janela offline anterior
   let lastSeenTs = sessionStartTimes.get(userId) || Date.now();
   let lidWarnAt = 0;
+  let unhealthySince = null;
+  let autoHealAttempts = 0;
+  let lastAutoHealAt = 0;
 
   // Acessa o self-chat no modo multi-device.
   // O Mensagens Salvas usa o LID do próprio usuário como chat ID (não @c.us).
@@ -1005,6 +1018,41 @@ export function startSelfChatPolling(userId, client) {
     }
   };
 
+  // Centraliza o que acontece quando um tick nao consegue ler o self-chat,
+  // venha de `result.error` ou de uma excecao (pagina do puppeteer morta,
+  // banco fora do ar). As duas sao o mesmo sintoma: "ready" mas mudo.
+  const markUnhealthy = (reason) => {
+    const now = Date.now();
+    const health = pollHealthByUser.get(userId) || {};
+    pollHealthByUser.set(userId, { ...health, lastError: reason, lastErrorAt: now });
+    if (now - lidWarnAt > 60000) {
+      lidWarnAt = now;
+      console.warn(`[poll:${userId}] Self-chat nao resolvido: ${reason}`);
+    }
+
+    if (!unhealthySince) unhealthySince = now;
+    if (
+      onUnhealthy
+      && now - unhealthySince > AUTO_HEAL_AFTER_MS
+      && autoHealAttempts < AUTO_HEAL_MAX_ATTEMPTS
+      && now - lastAutoHealAt > AUTO_HEAL_COOLDOWN_MS
+    ) {
+      autoHealAttempts += 1;
+      lastAutoHealAt = now;
+      // Zera a contagem: o restart ja foi acionado, nao insiste a cada
+      // tick enquanto ele esta em andamento (o novo client chama
+      // startSelfChatPolling de novo com contadores zerados).
+      unhealthySince = null;
+      console.warn(
+        `[poll:${userId}] Self-chat mudo ha mais de ${Math.round(AUTO_HEAL_AFTER_MS / 1000)}s ` +
+        `— acionando reinicio automatico (tentativa ${autoHealAttempts}/${AUTO_HEAL_MAX_ATTEMPTS}).`
+      );
+      Promise.resolve(onUnhealthy()).catch(err => {
+        console.error(`[poll:${userId}] Reinicio automatico falhou:`, err?.message || err);
+      });
+    }
+  };
+
   const interval = setInterval(async () => {
     try {
       const CHAT_ID = await getAssistantChatId(userId);
@@ -1014,20 +1062,14 @@ export function startSelfChatPolling(userId, client) {
 
       if (!result?.chatId) {
         // Nao retorna calado: sem isso um self-chat que nunca resolve o LID
-        // parece "conectado mas mudo". Loga no maximo 1x por minuto.
-        const now = Date.now();
-        const reason = result?.error || 'resposta vazia do Store';
-        const health = pollHealthByUser.get(userId) || {};
-        pollHealthByUser.set(userId, { ...health, lastError: reason, lastErrorAt: now });
-        if (now - lidWarnAt > 60000) {
-          lidWarnAt = now;
-          console.warn(`[poll:${userId}] Self-chat nao resolvido: ${reason}`);
-        }
+        // parece "conectado mas mudo".
+        markUnhealthy(result?.error || 'resposta vazia do Store');
         return;
       }
 
       // Resolveu: e o unico sinal confiavel de que o bot consegue mesmo ler
       // o self-chat. O /api/health usa a idade deste timestamp.
+      unhealthySince = null;
       pollHealthByUser.set(userId, {
         ...(pollHealthByUser.get(userId) || {}),
         lastOkAt: Date.now(),
@@ -1140,6 +1182,7 @@ export function startSelfChatPolling(userId, client) {
       }
     } catch (err) {
       console.warn(`[poll:${userId}] Erro:`, err?.message);
+      markUnhealthy(err?.message || 'excecao no ciclo de polling');
     }
   }, 4000);
 

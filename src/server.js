@@ -692,6 +692,18 @@ async function handleRequest(req, res, manager) {
     }
   }
 
+  if (pathname === '/api/admin/users/restart' && req.method === 'POST') {
+    if (!(await requireAdminApi(req, res))) return;
+    const body = await readBody(req);
+    if (!body.userId) return json(res, { error: 'userId obrigatorio' }, 400);
+    try {
+      manager.restartWhatsAppInstance(body.userId).catch(err => console.error('[server] Erro ao reiniciar bot:', err));
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   if (pathname === '/api/admin/users/delete' && req.method === 'POST') {
     if (!(await requireAdminApi(req, res))) return;
     const body = await readBody(req);
@@ -810,6 +822,17 @@ async function handleRequest(req, res, manager) {
     const whatsappStatus = await manager.getWhatsAppStatus(uid);
     const config = getConfig();
     const platformConfigured = isPlatformConfigured();
+    // Mesmo criterio do /api/health: 'ready' nao prova que o bot le o
+    // self-chat. O front usa isto pra nao mostrar "tudo pronto" com o bot mudo.
+    // Da uma folga logo apos ficar 'ready' (o primeiro poll ainda nao rodou),
+    // senao todo reconnect pisca "nao esta respondendo" por alguns segundos.
+    const poll = getSelfChatHealth(uid);
+    const session = await getWhatsAppSession(uid).catch(() => null);
+    const readySince = session?.last_ready_at ? new Date(session.last_ready_at).getTime() : 0;
+    const withinReadyGrace = Date.now() - readySince < 20_000;
+    const selfChatOk = whatsappStatus.status !== 'ready'
+      || withinReadyGrace
+      || (!!poll.lastOkAt && (Date.now() - poll.lastOkAt) < POLL_STALE_MS);
     return json(res, {
       userId: currentUser.id,
       configComplete: platformConfigured && !!currentUser?.assistant_chat_id,
@@ -821,6 +844,8 @@ async function handleRequest(req, res, manager) {
       botStatus: whatsappStatus.status,
       qrAvailable: whatsappStatus.qrAvailable,
       sessionPath: whatsappStatus.sessionPath,
+      selfChatOk,
+      lastPollError: poll.lastError || null,
     });
   }
 
@@ -853,6 +878,20 @@ async function handleRequest(req, res, manager) {
     if (!uid) return;
     try {
       manager.startWhatsAppInstance(uid).catch(err => console.error('[server] Erro ao retomar bot:', err));
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  if (pathname === '/api/user/restart' && req.method === 'POST') {
+    const uid = requireUserSession(req, res);
+    if (!uid) return;
+    try {
+      // Fire-and-forget: reiniciar reconecta o WhatsApp (ate ~90s), e o
+      // front acompanha via /api/status em vez de segurar a requisicao —
+      // importante numa rede de celular, onde um fetch de 90s costuma cair.
+      manager.restartWhatsAppInstance(uid).catch(err => console.error('[server] Erro ao reiniciar bot:', err));
       return json(res, { ok: true });
     } catch (err) {
       return json(res, { error: err.message }, 500);

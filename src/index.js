@@ -247,7 +247,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
       lastReadyAt: new Date().toISOString(),
     });
     startReminderLoop(user.id, client);
-    startSelfChatPolling(user.id, client);
+    startSelfChatPolling(user.id, client, { onUnhealthy: () => restartWhatsAppInstance(user.id) });
   });
 
   client.on('auth_failure', async error => {
@@ -311,6 +311,18 @@ export async function stopWhatsAppInstance(userId = getDefaultUserId(), finalSta
 
 export async function pauseWhatsAppInstance(userId = getDefaultUserId()) {
   await stopWhatsAppInstance(userId, 'paused');
+}
+
+// Reinicia o client sem logout: fecha o Chromium atual e sobe outro
+// reaproveitando a sessao do LocalAuth em disco (sem novo QR). E o que o
+// polling do self-chat aciona sozinho quando fica mudo por tempo demais, e o
+// que o botao "Reiniciar bot" do painel chama — pensado para quando o usuario
+// esta longe do servidor (ex: no celular) e nao tem como so reiniciar o
+// processo na mao.
+export async function restartWhatsAppInstance(userId = getDefaultUserId()) {
+  console.warn(`[index] Reiniciando instancia WhatsApp de ${userId}.`);
+  await stopWhatsAppInstance(userId, 'restarting');
+  return startWhatsAppInstance(userId);
 }
 
 // Faz logout no WhatsApp (desvincula o dispositivo) e remove a pasta de sessao.
@@ -398,6 +410,7 @@ async function main() {
     startWhatsAppInstance,
     stopWhatsAppInstance,
     pauseWhatsAppInstance,
+    restartWhatsAppInstance,
     logoutWhatsAppInstance,
     deleteUser,
     updateUserSettings,

@@ -366,32 +366,76 @@ function updateStep4State(status) {
   }
 }
 
+// Estados transitorios de uma reconexao (manual ou auto-heal) — o bot ja
+// estava configurado, entao a tela certa e "reconectando", nao o onboarding.
+const RECONNECTING_STATUSES = ['restarting', 'initializing', 'authenticated'];
+
 function updateReadyView(status) {
   const isPaused = status?.botStatus === 'paused';
+  const isReconnecting = RECONNECTING_STATUSES.includes(status?.botStatus);
+  // 'ready' porem sem leitura recente do self-chat: e exatamente o sintoma
+  // "conectado mas mudo" que motivou este indicador existir.
+  const isMute = status?.botStatus === 'ready' && status?.selfChatOk === false;
   const eyebrow = $('ready-eyebrow');
   const title = $('ready-title');
   const whatsappLabel = $('whatsapp-label');
   const whatsappIcon = $('whatsapp-icon');
   const whatsappCard = $('status-whatsapp');
+  const whatsappDetail = $('whatsapp-detail');
   const btnPause = $('btn-pause');
+  const btnRestart = $('btn-restart');
+
+  btnRestart?.classList.toggle('hidden', !(isMute || isReconnecting));
+  if (btnRestart) btnRestart.disabled = isReconnecting;
+
+  if (isReconnecting) {
+    if (eyebrow) eyebrow.textContent = 'Reiniciando';
+    if (title) title.textContent = 'Reconectando o WhatsApp...';
+    if (whatsappLabel) whatsappLabel.textContent = 'Reconectando (nao precisa de novo QR)';
+    if (whatsappIcon) whatsappIcon.textContent = '...';
+    whatsappCard?.classList.remove('ok', 'warn');
+    whatsappDetail?.classList.add('hidden');
+    if (btnPause) btnPause.disabled = true;
+    return;
+  }
+  if (btnPause) btnPause.disabled = false;
 
   if (isPaused) {
     if (eyebrow) eyebrow.textContent = 'Em pausa';
     if (title) title.textContent = 'Bot pausado';
     if (whatsappLabel) whatsappLabel.textContent = 'WhatsApp pausado';
     if (whatsappIcon) whatsappIcon.textContent = '||';
-    whatsappCard?.classList.remove('ok');
+    whatsappCard?.classList.remove('ok', 'warn');
+    whatsappDetail?.classList.add('hidden');
     if (btnPause) {
       btnPause.querySelector('.action-title').textContent = 'Retomar bot';
       btnPause.querySelector('.action-sub').textContent = 'Voltar a responder mensagens e enviar lembretes.';
       btnPause.dataset.action = 'resume';
+    }
+  } else if (isMute) {
+    if (eyebrow) eyebrow.textContent = 'Atencao';
+    if (title) title.textContent = 'Bot conectado, mas nao esta respondendo';
+    if (whatsappLabel) whatsappLabel.textContent = 'WhatsApp conectado (sem responder)';
+    if (whatsappIcon) whatsappIcon.textContent = '!';
+    whatsappCard?.classList.remove('ok');
+    whatsappCard?.classList.add('warn');
+    if (whatsappDetail) {
+      whatsappDetail.textContent = 'O WhatsApp esta conectado, mas o bot parou de ler as mensagens. Toque em "Reiniciar bot" abaixo.';
+      whatsappDetail.classList.remove('hidden');
+    }
+    if (btnPause) {
+      btnPause.querySelector('.action-title').textContent = 'Pausar bot';
+      btnPause.querySelector('.action-sub').textContent = 'Bot para de responder. Pode retomar a qualquer momento.';
+      btnPause.dataset.action = 'pause';
     }
   } else {
     if (eyebrow) eyebrow.textContent = 'Tudo pronto';
     if (title) title.textContent = 'Bot conectado';
     if (whatsappLabel) whatsappLabel.textContent = 'WhatsApp conectado';
     if (whatsappIcon) whatsappIcon.textContent = 'OK';
+    whatsappCard?.classList.remove('warn');
     whatsappCard?.classList.add('ok');
+    whatsappDetail?.classList.add('hidden');
     if (btnPause) {
       btnPause.querySelector('.action-title').textContent = 'Pausar bot';
       btnPause.querySelector('.action-sub').textContent = 'Bot para de responder. Pode retomar a qualquer momento.';
@@ -457,6 +501,18 @@ $('btn-pause')?.addEventListener('click', async () => {
     await pollStatus();
   } catch (err) {
     alert('Nao foi possivel ' + (action === 'pause' ? 'pausar' : 'retomar') + ': ' + err.message);
+  }
+});
+
+$('btn-restart')?.addEventListener('click', async () => {
+  const btn = $('btn-restart');
+  btn.disabled = true;
+  try {
+    await postJson('/api/user/restart');
+    await pollStatus();
+  } catch (err) {
+    btn.disabled = false;
+    alert('Nao foi possivel reiniciar: ' + err.message);
   }
 });
 
@@ -766,7 +822,12 @@ async function pollStatus() {
       return;
     }
 
-    if (status.botStatus === 'ready' || status.botStatus === 'paused') {
+    // Os estados de reconexao (restart manual ou auto-heal) so contam como
+    // "painel de gestao" fora do onboarding — durante o onboarding em si,
+    // 'initializing'/'authenticated' ja sao tratados pelo fluxo de step4 acima.
+    const isReconnectingExistingBot = RECONNECTING_STATUSES.includes(status.botStatus) && !finalizingSetup;
+
+    if (status.botStatus === 'ready' || status.botStatus === 'paused' || isReconnectingExistingBot) {
       // Usuario configurado — tela principal vira o painel de gestao
       // (a menos que esteja editando configuracoes propositalmente)
       if ((status.hasPhone || finalizingSetup) && !editingConfig) {
