@@ -247,7 +247,13 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
       lastReadyAt: new Date().toISOString(),
     });
     startReminderLoop(user.id, client);
-    startSelfChatPolling(user.id, client);
+    startSelfChatPolling(user.id, client, {
+      onInjectionLost: reason => {
+        recoverWhatsAppInstance(user.id, runtime, reason).catch(err => {
+          console.error(`[index] Recuperacao de ${user.id} falhou:`, err?.message || err);
+        });
+      },
+    });
   });
 
   client.on('auth_failure', async error => {
@@ -296,6 +302,32 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
   }
 
   return runtime;
+}
+
+// Pagina do WhatsApp Web perdeu a injecao da lib e nao voltou sozinha: fecha o
+// browser e sobe a instancia de novo (a sessao fica no disco, sem QR). E o
+// mesmo que o `docker compose restart bot` manual, sem derrubar o processo.
+// No maximo uma tentativa a cada 10 min por usuario, para nao entrar em laco
+// se o problema for do lado do WhatsApp.
+const RECOVERY_COOLDOWN_MS = 10 * 60_000;
+const lastRecoveryAt = new Map();
+
+async function recoverWhatsAppInstance(userId, runtime, reason) {
+  if (whatsappInstances.get(userId) !== runtime) return; // ja substituida
+  const last = lastRecoveryAt.get(userId) || 0;
+  if (Date.now() - last < RECOVERY_COOLDOWN_MS) {
+    console.warn(`[index] Recuperacao de ${userId} ignorada (cooldown). Motivo: ${reason}`);
+    return;
+  }
+  lastRecoveryAt.set(userId, Date.now());
+  console.warn(`[index] Recuperando instancia de ${userId}: ${reason}`);
+
+  stopReminderLoop(userId);
+  stopSelfChatPolling(userId);
+  clearSessionStart(userId);
+  await destroyRuntime(runtime, `recuperacao: ${reason}`);
+  whatsappInstances.delete(userId);
+  await startWhatsAppInstance(userId);
 }
 
 export async function stopWhatsAppInstance(userId = getDefaultUserId(), finalStatus = 'stopped') {

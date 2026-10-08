@@ -887,7 +887,12 @@ export function stopReminderLoop(userId) {
 // registrados contra duas mensagens lidas pelo polling. Nao remover sem
 // refazer esse teste (o campo `source` do log mostra a origem de cada
 // mensagem processada).
-export function startSelfChatPolling(userId, client) {
+// Quanto tempo esperar a propria lib reinjetar o window.WWebJS depois de um
+// reload do WhatsApp Web, antes de declarar a pagina perdida. O inject() dela
+// espera ate 30s pelo window.Debug; damos o dobro de folga.
+const INJECTION_GRACE_MS = 60_000;
+
+export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
   // Um 'ready' pode disparar mais de uma vez (whatsapp-web.js reinjeta apos
   // reload interno do WhatsApp Web). Reinicia o polling em vez de sair na
   // primeira chamada: o intervalo antigo ficaria preso a um lastSeenTs velho.
@@ -896,6 +901,8 @@ export function startSelfChatPolling(userId, client) {
   // Comeca a partir do instante atual: ignora mensagens da janela offline anterior
   let lastSeenTs = sessionStartTimes.get(userId) || Date.now();
   let lidWarnAt = 0;
+  let injectionLostAt = 0;
+  let injectionLostReported = false;
 
   // Acessa o self-chat no modo multi-device.
   // O Mensagens Salvas usa o LID do próprio usuário como chat ID (não @c.us).
@@ -1009,6 +1016,44 @@ export function startSelfChatPolling(userId, client) {
     try {
       const CHAT_ID = await getAssistantChatId(userId);
       if (!CHAT_ID) return;
+
+      // Quando o WhatsApp Web recarrega a pagina, a lib reinjeta o
+      // window.WWebJS no 'framenavigated'. Se essa reinjecao falha (em
+      // 24/09/2026 lancou 'auth timeout'), o polling abaixo continua lendo
+      // via window.require, mas TODO envio quebra com "reading 'getChat'".
+      // O bot ficou duas semanas assim: lia, chamava o Gemini e nao respondia.
+      let wwebjsOk = null;
+      try {
+        wwebjsOk = await client.pupPage.evaluate(() => typeof window.WWebJS?.getChat === 'function');
+      } catch { /* pagina navegando: inconclusivo, tenta no proximo tick */ }
+
+      if (wwebjsOk === false) {
+        const now = Date.now();
+        if (!injectionLostAt) {
+          injectionLostAt = now;
+          console.warn(`[poll:${userId}] window.WWebJS ausente — aguardando reinjecao da lib.`);
+        }
+        pollHealthByUser.set(userId, {
+          ...(pollHealthByUser.get(userId) || {}),
+          injectionOk: false,
+          lastError: 'window.WWebJS ausente (envio indisponivel)',
+          lastErrorAt: now,
+        });
+        if (now - injectionLostAt >= INJECTION_GRACE_MS && !injectionLostReported) {
+          injectionLostReported = true;
+          console.error(`[poll:${userId}] window.WWebJS ausente ha ${Math.round((now - injectionLostAt) / 1000)}s — reiniciando instancia.`);
+          onInjectionLost?.('window.WWebJS ausente');
+        }
+        // Nao processa: sem envio a resposta se perderia. Como lastSeenTs nao
+        // avanca, as mensagens sao lidas assim que a injecao voltar.
+        return;
+      }
+      if (wwebjsOk === true && injectionLostAt) {
+        console.log(`[poll:${userId}] window.WWebJS restaurado apos ${Math.round((Date.now() - injectionLostAt) / 1000)}s.`);
+        injectionLostAt = 0;
+        injectionLostReported = false;
+        pollHealthByUser.set(userId, { ...(pollHealthByUser.get(userId) || {}), injectionOk: true });
+      }
 
       const result = await fetchFromStore();
 

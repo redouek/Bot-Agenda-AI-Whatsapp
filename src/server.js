@@ -200,7 +200,9 @@ async function buildHealthPayload(manager) {
     monitored.push({
       status: runtime.status,
       ready: runtime.status === 'ready',
-      selfChatOk: !!poll.lastOkAt && (now - poll.lastOkAt) < POLL_STALE_MS,
+      // Ler o self-chat nao basta: sem window.WWebJS o bot le e nao consegue
+      // responder (estado em que ficou de 24/09 a 08/10/2026 dando 'healthy').
+      selfChatOk: !!poll.lastOkAt && (now - poll.lastOkAt) < POLL_STALE_MS && poll.injectionOk !== false,
       lastPollError: poll.lastError || null,
     });
   }
