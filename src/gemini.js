@@ -32,6 +32,16 @@ function extractJsonObject(text) {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_SCAN_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+
+// Extracao deterministica de e-mails do texto do usuario. Serve de rede de
+// seguranca independente do que a IA extrair no campo attendees do JSON —
+// a IA pode nao seguir a instrucao de forma confiavel, mas um e-mail escrito
+// na mensagem deve sempre virar convidado.
+function extractEmailsFromText(text) {
+  if (!text) return [];
+  return [...text.matchAll(EMAIL_SCAN_RE)].map(m => m[0]);
+}
 
 function normalizeAttendees(attendees) {
   if (!Array.isArray(attendees)) return [];
@@ -107,7 +117,10 @@ function normalizeEvent(event, fallbackText = '') {
     location: event.location || '',
     locationSuggestion: event.locationSuggestion || '',
     timeZone: event.timeZone || timeZone,
-    attendees: normalizeAttendees(event.attendees),
+    attendees: normalizeAttendees([
+      ...(Array.isArray(event.attendees) ? event.attendees : []),
+      ...extractEmailsFromText(fallbackText),
+    ]),
   };
 }
 
@@ -135,6 +148,7 @@ function fallbackScheduleProposal(text) {
       location: '',
       locationSuggestion: '',
       timeZone: getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo',
+      attendees: extractEmailsFromText(text),
     },
   };
 }
@@ -241,9 +255,17 @@ async function downloadInlinePart(message) {
     return null;
   }
 
+  // O WhatsApp reporta audio de voz como "audio/ogg; codecs=opus", mas a API
+  // do Gemini so aceita o mime type base (ex: "audio/ogg") — com o parametro
+  // de codec ela rejeita a requisicao e o audio nunca chega a ser interpretado.
+  const mimeType = media.mimetype.split(';')[0].trim();
+  if (mimeType !== media.mimetype) {
+    console.log(`[gemini] mimetype normalizado para a IA: "${media.mimetype}" -> "${mimeType}"`);
+  }
+
   return {
     inlineData: {
-      mimeType: media.mimetype,
+      mimeType,
       data: media.data,
     },
   };

@@ -674,7 +674,10 @@ export async function processIncomingMessage(userId, client, message, source = '
   try {
     plan = await planConversationTurn({ message, type: message.type, text: body, history, pendingAction });
   } catch (error) {
-    console.error(`[bot:${userId}] Falha na chamada do Gemini:`, error?.status, error?.message);
+    console.error(
+      `[bot:${userId}] Falha na chamada do Gemini:`, error?.status, error?.message,
+      '| type:', message.type, '| hasMedia:', !!message.hasMedia
+    );
     await replyToMessage(userId, client, message, friendlyAiError(error));
     return;
   }
