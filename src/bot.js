@@ -146,6 +146,9 @@ function formatSingleEvent(event) {
   if (event.location) lines.push(`Local: ${event.location}`);
   if (event.locationSuggestion) lines.push(`Sugestao de endereco: ${event.locationSuggestion}`);
   if (event.description && event.description !== event.summary) lines.push(`Descricao: ${event.description}`);
+  if (Array.isArray(event.attendees) && event.attendees.length) {
+    lines.push(`Convidado(s): ${event.attendees.join(', ')}`);
+  }
   return lines.join('\n');
 }
 
@@ -159,7 +162,11 @@ async function formatPendingActionForConfirmation(pendingAction, userId) {
     const lines = ['Eventos para confirmar:'];
     pendingAction.events.forEach((event, index) => {
       const timeZone = event.timeZone || getTimeZone();
-      lines.push(`${index + 1}. ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`);
+      let line = `${index + 1}. ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`;
+      if (Array.isArray(event.attendees) && event.attendees.length) {
+        line += ` (convidado(s): ${event.attendees.join(', ')})`;
+      }
+      lines.push(line);
     });
     return lines.join('\n') + tail;
   }
@@ -379,7 +386,7 @@ async function createMultipleEvents(events, userId, calendarId) {
   const created = [];
   for (const event of events) {
     const result = await createEvent(event, userId, calendarId);
-    if (result?.id) created.push({ id: result.id, summary: event.summary });
+    if (result?.id) created.push({ id: result.id, summary: event.summary, attendees: event.attendees || [] });
   }
   return created;
 }
@@ -480,7 +487,10 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
       const created = await createMultipleEvents(pending.events || [], userId, targetCalendarId);
       pendingActions.delete(pendingKey);
       if (created.length) {
-        const summary = created.map(item => `- ${item.summary}`).join('\n');
+        const summary = created.map(item => {
+          const invite = item.attendees?.length ? ` (convite enviado para ${item.attendees.join(', ')})` : '';
+          return `- ${item.summary}${invite}`;
+        }).join('\n');
         const prefix = replacedSummary ? `Cancelei "${replacedSummary}" e agendei a versao corrigida:\n` : 'Eventos agendados com sucesso:\n';
         await replyToMessage(userId, client, message, `${prefix}${summary}`);
         return true;
@@ -508,9 +518,12 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
     const created = await createEvent(pending.event, userId, targetCalendarId);
     pendingActions.delete(pendingKey);
     if (created?.id) {
+      const invite = pending.event.attendees?.length
+        ? ` Convite enviado por email para ${pending.event.attendees.join(', ')}.`
+        : '';
       const msg = replacedSummary
-        ? `Cancelei "${replacedSummary}" e agendei a versao corrigida: ${pending.event.summary}.`
-        : `Evento agendado com sucesso: ${pending.event.summary}.`;
+        ? `Cancelei "${replacedSummary}" e agendei a versao corrigida: ${pending.event.summary}.${invite}`
+        : `Evento agendado com sucesso: ${pending.event.summary}.${invite}`;
       await replyToMessage(userId, client, message, msg);
       return true;
     }

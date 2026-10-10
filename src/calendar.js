@@ -166,9 +166,16 @@ export async function createEvent(data, userId, calendarId) {
     event.recurrence = Array.isArray(data.recurrence) ? data.recurrence : [data.recurrence];
   }
 
-  console.log('[calendar] Criando evento em', targetCalendarId, '- summary:', event.summary);
+  if (Array.isArray(data.attendees) && data.attendees.length) {
+    event.attendees = data.attendees.map(email => ({ email }));
+  }
+
+  const insertParams = { calendarId: targetCalendarId, requestBody: event };
+  if (event.attendees?.length) insertParams.sendUpdates = 'all';
+
+  console.log('[calendar] Criando evento em', targetCalendarId, '- summary:', event.summary, '- convidados:', event.attendees?.length || 0);
   try {
-    const res = await client.events.insert({ calendarId: targetCalendarId, requestBody: event });
+    const res = await client.events.insert(insertParams);
     return { ...res.data, calendarId: targetCalendarId };
   } catch (err) {
     const status = err?.code || err?.response?.status;

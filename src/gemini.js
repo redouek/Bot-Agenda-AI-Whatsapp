@@ -31,6 +31,21 @@ function extractJsonObject(text) {
   }
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeAttendees(attendees) {
+  if (!Array.isArray(attendees)) return [];
+  const seen = new Set();
+  const result = [];
+  for (const raw of attendees) {
+    const email = String(raw || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(email) || seen.has(email)) continue;
+    seen.add(email);
+    result.push(email);
+  }
+  return result;
+}
+
 function toISOStringSafe(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -92,6 +107,7 @@ function normalizeEvent(event, fallbackText = '') {
     location: event.location || '',
     locationSuggestion: event.locationSuggestion || '',
     timeZone: event.timeZone || timeZone,
+    attendees: normalizeAttendees(event.attendees),
   };
 }
 
@@ -144,6 +160,7 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
     'Para follow-ups de listagem ("e de hoje?", "e essa semana?", "e amanha?"), responda DIRETAMENTE com list_events do periodo correspondente — nao peca confirmacao nem responda "nao consegui entender".',
     'Se a mensagem for um pedido de agendamento ou trouxer informacoes de evento UNICO, produza schedule_proposal. Se trouxer MULTIPLOS eventos em datas distintas e nao-recorrentes (ex: "segunda e quarta da semana que vem", "dia 5 e dia 10 as 10h"), produza kind=multiple_events com events:[evento1, evento2, ...]. Cada evento DEVE ter summary, startDateTime e endDateTime preenchidos.',
     'EXTRACAO DO TITULO (summary) — DEVE SER RICO E DESCRITIVO: capture TODO o contexto relevante do evento no proprio summary, incluindo pessoa(s), assunto e local quando mencionado pelo usuario. Verbos de comando ("agenda", "marca", "anota", "cria", "adiciona", "coloca", "schedule") NUNCA fazem parte do summary — remova-os e tambem preposicoes soltas logo apos ("pra", "para", "no", "na", "de", "do", "da"). PRESERVE: nomes proprios, assuntos, locais (se forem distintivos do evento). Exemplos: "agenda almoco com Marcos na Pilotin 15h" -> summary="Almoco com Marcos na Pilotin"; "marca reuniao com cliente sobre proposta de venda quinta 9h" -> summary="Reuniao com cliente sobre proposta de venda"; "agenda dentista Dr Flavia 14h" -> summary="Dentista (Dr Flavia)"; "fisioterapia segunda 11:30" -> summary="Fisioterapia". REGRA: melhor titulo longo e claro do que titulo curto e ambiguo. NAO produza "Agenda X" como titulo.',
+    'CONVIDADOS (attendees) — email: se o usuario pedir para incluir/convidar alguem no evento e fornecer um ou mais enderecos de e-mail (ex: "convida joao@gmail.com", "inclui maria@empresa.com como convidada", "manda convite pra fulano@email.com e ciclano@email.com"), coloque esses enderecos no campo attendees (array de strings de email) do evento. So inclua enderecos que sejam emails validos (tem "@" e dominio) — se o usuario so der um nome sem email, NAO invente um email: produza chat perguntando o e-mail do convidado. No reply, quando houver attendees, mencione que o convite sera enviado por email para esse(s) endereco(s) (ainda sem afirmar que foi enviado, pois depende da confirmacao).',
     'DESCRICAO (description) — DEIXE VAZIA: nao gere description automatica. O titulo (summary) ja deve carregar todo o contexto. Use description="" SEMPRE, exceto quando o usuario explicitamente disser "com a descricao X" ou "nas observacoes Y" — apenas nesses casos coloque exatamente o que ele pediu como observacao.',
     'TOM do reply em schedule_proposal: NUNCA afirme que o evento foi agendado/marcado/criado — ainda esta pendente de confirmacao do usuario. Use linguagem provisoria: "anotei", "entendi", "corrigi", "ajustei", "ok, vou propor isso". Exemplos validos: "Anotei.", "Ok, corrigi o nome para X.", "Entendi, ajustei o horario para 15h.". NUNCA escreva "agendado", "marcado", "criado", "salvo" no reply.',
     `REGRA CRITICA de fuso horario: o usuario esta em ${timeZone} (UTC-3, GMT-3). Qualquer horario mencionado pelo usuario (ex: "14:30", "as tres da tarde") esta SEMPRE nesse fuso. O startDateTime DEVE usar o offset -03:00 (ex: "2026-03-25T14:30:00-03:00"). NUNCA trate horarios do usuario como UTC.`,
@@ -162,7 +179,7 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
     'Se a mensagem for apenas conversa, produza chat.',
     'Responda apenas JSON valido, sem markdown.',
     'Formato:',
-    '{"kind":"chat|schedule_proposal|multiple_events|list_events|cancel_event|lookup|none","reply":"texto opcional","requiresConfirmation":true|false,"replacePreviousQuery":"titulo do evento antigo a cancelar (opcional, so para correcoes)","event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":"","recurrence":[]},"events":[{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","timeZone":""}],"list_events":{"period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"cancel_event":{"query":"palavras-chave do nome","period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"lookup":{"source":"football|wiki|weather","query":"consulta objetiva","intent":"fixtures|general","period":"today|tomorrow|this_week"}}',
+    '{"kind":"chat|schedule_proposal|multiple_events|list_events|cancel_event|lookup|none","reply":"texto opcional","requiresConfirmation":true|false,"replacePreviousQuery":"titulo do evento antigo a cancelar (opcional, so para correcoes)","event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":"","recurrence":[],"attendees":["email@exemplo.com"]},"events":[{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","timeZone":"","attendees":["email@exemplo.com"]}],"list_events":{"period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"cancel_event":{"query":"palavras-chave do nome","period":"today|tomorrow|this_week|date_range","startDate":"","endDate":""},"lookup":{"source":"football|wiki|weather","query":"consulta objetiva","intent":"fixtures|general","period":"today|tomorrow|this_week"}}',
     `Data/hora atual: ${todayLocal}`,
     `Historico recente:\n${historyText}`,
     `Confirmacao pendente: ${pendingText}`,
