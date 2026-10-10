@@ -19,3 +19,8 @@ agenda-ai-red-*.json
 
 .DS_Store
 Thumbs.db
+
+# Chaves privadas / SSH
+*.pem
+*.key
+*.key.pub

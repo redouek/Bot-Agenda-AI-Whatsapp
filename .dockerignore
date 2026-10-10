@@ -11,3 +11,8 @@ tmp
 .vscode
 agenda-ai-red-*.json
 *-service-account*.json
+
+# Chaves privadas / SSH
+*.pem
+*.key
+*.key.pub
