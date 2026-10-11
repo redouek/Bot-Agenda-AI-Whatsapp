@@ -146,7 +146,12 @@ function formatSingleEvent(event) {
   if (event.location) lines.push(`Local: ${event.location}`);
   if (event.locationSuggestion) lines.push(`Sugestao de endereco: ${event.locationSuggestion}`);
   if (event.description && event.description !== event.summary) lines.push(`Descricao: ${event.description}`);
+  if (event.attendees?.length) lines.push(`Convidados (recebem o convite por e-mail): ${event.attendees.join(', ')}`);
   return lines.join('\n');
+}
+
+function formatInviteNote(attendees) {
+  return attendees?.length ? ` Convite enviado para ${attendees.join(', ')}.` : '';
 }
 
 async function formatPendingActionForConfirmation(pendingAction, userId) {
@@ -160,6 +165,7 @@ async function formatPendingActionForConfirmation(pendingAction, userId) {
     pendingAction.events.forEach((event, index) => {
       const timeZone = event.timeZone || getTimeZone();
       lines.push(`${index + 1}. ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`);
+      if (event.attendees?.length) lines.push(`   Convidados (recebem o convite por e-mail): ${event.attendees.join(', ')}`);
     });
     return lines.join('\n') + tail;
   }
@@ -379,7 +385,7 @@ async function createMultipleEvents(events, userId, calendarId) {
   const created = [];
   for (const event of events) {
     const result = await createEvent(event, userId, calendarId);
-    if (result?.id) created.push({ id: result.id, summary: event.summary });
+    if (result?.id) created.push({ id: result.id, summary: event.summary, attendees: event.attendees || [] });
   }
   return created;
 }
@@ -480,7 +486,9 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
       const created = await createMultipleEvents(pending.events || [], userId, targetCalendarId);
       pendingActions.delete(pendingKey);
       if (created.length) {
-        const summary = created.map(item => `- ${item.summary}`).join('\n');
+        const summary = created
+          .map(item => `- ${item.summary}${item.attendees.length ? ` (convite enviado para ${item.attendees.join(', ')})` : ''}`)
+          .join('\n');
         const prefix = replacedSummary ? `Cancelei "${replacedSummary}" e agendei a versao corrigida:\n` : 'Eventos agendados com sucesso:\n';
         await replyToMessage(userId, client, message, `${prefix}${summary}`);
         return true;
@@ -511,7 +519,7 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
       const msg = replacedSummary
         ? `Cancelei "${replacedSummary}" e agendei a versao corrigida: ${pending.event.summary}.`
         : `Evento agendado com sucesso: ${pending.event.summary}.`;
-      await replyToMessage(userId, client, message, msg);
+      await replyToMessage(userId, client, message, msg + formatInviteNote(pending.event.attendees));
       return true;
     }
     await replyToMessage(userId, client, message, 'Nao consegui criar o evento no Google Calendar.');

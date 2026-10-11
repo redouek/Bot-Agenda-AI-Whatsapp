@@ -166,9 +166,21 @@ export async function createEvent(data, userId, calendarId) {
     event.recurrence = Array.isArray(data.recurrence) ? data.recurrence : [data.recurrence];
   }
 
-  console.log('[calendar] Criando evento em', targetCalendarId, '- summary:', event.summary);
+  // Convidados: sem sendUpdates o Google inclui a pessoa no evento mas NAO
+  // manda o e-mail de convite — o padrao da API e nao notificar ninguem.
+  const attendees = Array.isArray(data.attendees) ? data.attendees.filter(Boolean) : [];
+  const params = { calendarId: targetCalendarId, requestBody: event };
+  if (attendees.length) {
+    event.attendees = attendees.map(email => ({ email }));
+    params.sendUpdates = 'all';
+  }
+
+  console.log(
+    '[calendar] Criando evento em', targetCalendarId, '- summary:', event.summary,
+    attendees.length ? `- convidados: ${attendees.join(', ')}` : ''
+  );
   try {
-    const res = await client.events.insert({ calendarId: targetCalendarId, requestBody: event });
+    const res = await client.events.insert(params);
     return { ...res.data, calendarId: targetCalendarId };
   } catch (err) {
     const status = err?.code || err?.response?.status;
@@ -261,10 +273,12 @@ export async function searchEvents(query, daysAhead = 60, userId) {
 }
 
 // deleteEvent: precisa do calendarId onde o evento esta. Se nao passar, tenta cada agenda.
+// sendUpdates 'all': se o evento tem convidados, eles recebem o aviso de
+// cancelamento (sem convidados nao muda nada).
 export async function deleteEvent(eventId, userId, calendarId) {
   const client = await getCalendarClient(userId);
   if (calendarId) {
-    await client.events.delete({ calendarId, eventId });
+    await client.events.delete({ calendarId, eventId, sendUpdates: 'all' });
     return;
   }
   // Fallback: tenta em cada agenda ate uma funcionar
@@ -272,7 +286,7 @@ export async function deleteEvent(eventId, userId, calendarId) {
   let lastErr = null;
   for (const calId of calendarIds) {
     try {
-      await client.events.delete({ calendarId: calId, eventId });
+      await client.events.delete({ calendarId: calId, eventId, sendUpdates: 'all' });
       return;
     } catch (err) {
       lastErr = err;
