@@ -1,6 +1,9 @@
 import { initDatabase, getUser } from '/app/src/database.js';
 await initDatabase();
-const u = await getUser('douek.renato@gmail.com');
+// Uso: DUMP_USER=<email> node .tmp-dump.mjs
+const email = process.env.DUMP_USER;
+if (!email) { console.error('Defina DUMP_USER com o e-mail do usuario.'); process.exit(1); }
+const u = await getUser(email);
 const headers = { 'X-Auth-Token': u.football_api_key };
 
 // Lista as competicoes que queremos pegar times
