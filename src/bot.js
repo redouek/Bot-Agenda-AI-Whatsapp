@@ -1222,7 +1222,26 @@ export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
             const msg = MsgStore?.get?.(pollId);
             const options = (msg?.pollOptions || []).map(o => ({ id: o.localId, name: o.name }));
             const rows = await Schema.getTable().equals(['parentMsgKey'], pollId);
+            // Vazio pode ser chave em outro formato ou voto que nunca chegou:
+            // amostra das ultimas linhas da tabela, sem filtro, para distinguir.
+            let sample = null;
+            try {
+              const table = Schema.getTable();
+              const all = typeof table.all === 'function' ? await table.all()
+                : typeof table.toArray === 'function' ? await table.toArray() : null;
+              sample = all ? {
+                total: all.length,
+                last: all.slice(-5).map(r => ({
+                  parentMsgKey: String(r.parentMsgKey),
+                  selected: Array.from(new Uint8Array(r.selectedOptionLocalIds || [])),
+                  ts: r.senderTimestampMs || null,
+                })),
+              } : { tableMethods: Object.keys(Object.getPrototypeOf(table) || {}).concat(Object.keys(table)).slice(0, 30) };
+            } catch (e) { sample = { error: e.message }; }
+            const voteFields = msg ? Object.keys(msg.attributes || msg).filter(k => /vote|poll/i.test(k)) : [];
             return {
+              sample,
+              voteFields,
               options,
               votes: rows.map(r => ({
                 selected: Array.from(new Uint8Array(r.selectedOptionLocalIds || [])),
