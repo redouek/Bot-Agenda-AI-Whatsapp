@@ -292,7 +292,6 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
   // (o message_create nao dispara). Por enquanto so registra.
   client.on('vote_update', vote => {
     console.log(`[poll-diag:${user.id}] vote_update:`, JSON.stringify({
-      voter: vote.voter,
       selected: (vote.selectedOptions || []).map(o => o?.name),
       parent: vote.parentMessage?.id?._serialized,
     }));

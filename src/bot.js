@@ -1211,15 +1211,29 @@ export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
           continue;
         }
         try {
-          const votes = await client.getPollVotes(pollId);
-          const summary = votes.map(v => ({
-            voter: v.voter,
-            selected: (v.selectedOptions || []).map(o => o?.name),
-          }));
+          // client.getPollVotes() quebra aqui ("MsgKey.fromString: str is
+          // null") pelo mesmo id._serialized ausente da midia. Le a tabela de
+          // votos do WA Web direto, com o id que o proprio polling ja tem.
+          const summary = await client.pupPage.evaluate(async (pollId) => {
+            const load = (name) => { try { return window.require(name); } catch { return null; } };
+            const Schema = load('WAWebPollsVotesSchema');
+            const MsgStore = window.Store?.Msg || load('WAWebCollections')?.Msg;
+            if (!Schema) return { error: 'WAWebPollsVotesSchema indisponivel' };
+            const msg = MsgStore?.get?.(pollId);
+            const options = (msg?.pollOptions || []).map(o => ({ id: o.localId, name: o.name }));
+            const rows = await Schema.getTable().equals(['parentMsgKey'], pollId);
+            return {
+              options,
+              votes: rows.map(r => ({
+                selected: Array.from(new Uint8Array(r.selectedOptionLocalIds || [])),
+                ts: r.senderTimestampMs || null,
+              })),
+            };
+          }, pollId);
           const sig = JSON.stringify(summary);
           if (sig !== watch.lastSig) {
             watch.lastSig = sig;
-            console.log(`[poll-diag:${userId}] getPollVotes(${pollId}) = ${sig}`);
+            console.log(`[poll-diag:${userId}] votos(${pollId}) = ${sig}`);
           }
         } catch (err) {
           const sig = `erro:${err?.message || err}`;
