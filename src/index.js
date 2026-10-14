@@ -288,15 +288,6 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     }
   });
 
-  // Diagnostico: ainda nao se sabe se este evento dispara no self-chat
-  // (o message_create nao dispara). Por enquanto so registra.
-  client.on('vote_update', vote => {
-    console.log(`[poll-diag:${user.id}] vote_update:`, JSON.stringify({
-      selected: (vote.selectedOptions || []).map(o => o?.name),
-      parent: vote.parentMessage?.id?._serialized,
-    }));
-  });
-
   try {
     await initializeWithWatchdog(client, runtime, INIT_TIMEOUT_MS);
   } catch (error) {

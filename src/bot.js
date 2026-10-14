@@ -899,7 +899,6 @@ export function stopReminderLoop(userId) {
 // reload do WhatsApp Web, antes de declarar a pagina perdida. O inject() dela
 // espera ate 30s pelo window.Debug; damos o dobro de folga.
 const INJECTION_GRACE_MS = 60_000;
-const POLL_WATCH_MS = 10 * 60_000;
 
 export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
   // Um 'ready' pode disparar mais de uma vez (whatsapp-web.js reinjeta apos
@@ -912,7 +911,6 @@ export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
   let lidWarnAt = 0;
   let injectionLostAt = 0;
   let injectionLostReported = false;
-  const watchedPolls = new Map();
 
   // Acessa o self-chat no modo multi-device.
   // O Mensagens Salvas usa o LID do próprio usuário como chat ID (não @c.us).
@@ -1099,12 +1097,10 @@ export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
         console.log(`[poll:${userId}] Nova mensagem: fromMe=${raw.fromMe} type=${raw.type} hasMedia=${raw.hasMedia} body="${raw.body?.slice(0, 60)}"`);
 
         // Enquete nao e conversa: chegava ao Gemini com body vazio e gerava
-        // resposta sem sentido. Fica so em observacao para o diagnostico de votos.
-        if (raw.type === 'poll_creation') {
-          watchedPolls.set(raw.id, { until: Date.now() + POLL_WATCH_MS, lastSig: null });
-          console.log(`[poll-diag:${userId}] Enquete detectada id=${raw.id} — observando votos por ${POLL_WATCH_MS / 60000} min.`);
-          continue;
-        }
+        // resposta sem sentido. Tambem nao serve como botao: em 14/10/2026 os
+        // votos no self-chat nunca chegaram a sessao web (nem vote_update, nem
+        // tabela de votos), criando e votando pelo app ou pelo web.
+        if (raw.type === 'poll_creation') continue;
 
         // Mensagens com mídia (áudio, imagem, video) precisam do downloadMedia funcional.
         // O objeto sintético não tem isso, então busca o Message real via getMessageById.
@@ -1200,61 +1196,6 @@ export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
       if (rawMessages.length > 0) {
         const maxTs = Math.max(...rawMessages.map(m => m.timestamp * 1000));
         if (maxTs > lastSeenTs) lastSeenTs = maxTs;
-      }
-
-      // Diagnostico: o vote_update dispara no self-chat? Se nao, o polling
-      // consegue ler o voto direto do banco do WA Web? Loga so quando muda.
-      for (const [pollId, watch] of watchedPolls) {
-        if (Date.now() > watch.until) {
-          watchedPolls.delete(pollId);
-          console.log(`[poll-diag:${userId}] Fim da observacao da enquete ${pollId}.`);
-          continue;
-        }
-        try {
-          // client.getPollVotes() quebra aqui ("MsgKey.fromString: str is
-          // null") pelo mesmo id._serialized ausente da midia. Le a tabela de
-          // votos do WA Web direto, com o id que o proprio polling ja tem.
-          const summary = await client.pupPage.evaluate(async (pollId) => {
-            const load = (name) => { try { return window.require(name); } catch { return null; } };
-            const Schema = load('WAWebPollsVotesSchema');
-            const MsgStore = window.Store?.Msg || load('WAWebCollections')?.Msg;
-            if (!Schema) return { error: 'WAWebPollsVotesSchema indisponivel' };
-            const msg = MsgStore?.get?.(pollId);
-            const options = (msg?.pollOptions || []).map(o => ({ id: o.localId, name: o.name }));
-            // O id do polling termina em "_out"; as chaves da tabela usam o
-            // formato true_<remote>_<id>[_<participante>]. Busca pelo trecho
-            // unico da mensagem, valendo qualquer formato.
-            const msgIdPart = String(pollId).split('_').find(p => /^[0-9A-F]{16,}$/i.test(p)) || '';
-            const all = await Schema.getTable().all();
-            const rows = all.filter(r => msgIdPart && String(r.parentMsgKey).includes(msgIdPart));
-            let snapshot = null;
-            try {
-              const s = msg?.pollVotesSnapshot;
-              snapshot = s == null ? null : JSON.parse(JSON.stringify(s, (k, v) =>
-                v instanceof Uint8Array || v instanceof ArrayBuffer ? Array.from(new Uint8Array(v)) : v));
-            } catch (e) { snapshot = { error: e.message }; }
-            return {
-              keys: [...new Set(rows.map(r => String(r.parentMsgKey)))],
-              snapshot,
-              options,
-              votes: rows.map(r => ({
-                selected: Array.from(new Uint8Array(r.selectedOptionLocalIds || [])),
-                ts: r.senderTimestampMs || null,
-              })),
-            };
-          }, pollId);
-          const sig = JSON.stringify(summary);
-          if (sig !== watch.lastSig) {
-            watch.lastSig = sig;
-            console.log(`[poll-diag:${userId}] votos(${pollId}) = ${sig}`);
-          }
-        } catch (err) {
-          const sig = `erro:${err?.message || err}`;
-          if (sig !== watch.lastSig) {
-            watch.lastSig = sig;
-            console.warn(`[poll-diag:${userId}] getPollVotes(${pollId}) falhou: ${err?.message || err}`);
-          }
-        }
       }
     } catch (err) {
       console.warn(`[poll:${userId}] Erro:`, err?.message);
