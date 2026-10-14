@@ -1221,27 +1221,21 @@ export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
             if (!Schema) return { error: 'WAWebPollsVotesSchema indisponivel' };
             const msg = MsgStore?.get?.(pollId);
             const options = (msg?.pollOptions || []).map(o => ({ id: o.localId, name: o.name }));
-            const rows = await Schema.getTable().equals(['parentMsgKey'], pollId);
-            // Vazio pode ser chave em outro formato ou voto que nunca chegou:
-            // amostra das ultimas linhas da tabela, sem filtro, para distinguir.
-            let sample = null;
+            // O id do polling termina em "_out"; as chaves da tabela usam o
+            // formato true_<remote>_<id>[_<participante>]. Busca pelo trecho
+            // unico da mensagem, valendo qualquer formato.
+            const msgIdPart = String(pollId).split('_').find(p => /^[0-9A-F]{16,}$/i.test(p)) || '';
+            const all = await Schema.getTable().all();
+            const rows = all.filter(r => msgIdPart && String(r.parentMsgKey).includes(msgIdPart));
+            let snapshot = null;
             try {
-              const table = Schema.getTable();
-              const all = typeof table.all === 'function' ? await table.all()
-                : typeof table.toArray === 'function' ? await table.toArray() : null;
-              sample = all ? {
-                total: all.length,
-                last: all.slice(-5).map(r => ({
-                  parentMsgKey: String(r.parentMsgKey),
-                  selected: Array.from(new Uint8Array(r.selectedOptionLocalIds || [])),
-                  ts: r.senderTimestampMs || null,
-                })),
-              } : { tableMethods: Object.keys(Object.getPrototypeOf(table) || {}).concat(Object.keys(table)).slice(0, 30) };
-            } catch (e) { sample = { error: e.message }; }
-            const voteFields = msg ? Object.keys(msg.attributes || msg).filter(k => /vote|poll/i.test(k)) : [];
+              const s = msg?.pollVotesSnapshot;
+              snapshot = s == null ? null : JSON.parse(JSON.stringify(s, (k, v) =>
+                v instanceof Uint8Array || v instanceof ArrayBuffer ? Array.from(new Uint8Array(v)) : v));
+            } catch (e) { snapshot = { error: e.message }; }
             return {
-              sample,
-              voteFields,
+              keys: [...new Set(rows.map(r => String(r.parentMsgKey)))],
+              snapshot,
               options,
               votes: rows.map(r => ({
                 selected: Array.from(new Uint8Array(r.selectedOptionLocalIds || [])),
