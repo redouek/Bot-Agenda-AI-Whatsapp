@@ -282,8 +282,21 @@ function getPeriodRange(period, startDate, endDate) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
+// A mesma mensagem chega com o id serializado de formas diferentes conforme a
+// origem: "true_5511...@c.us_3EB0..." pelo evento e "true_1896...@lid_3EB0..."
+// pelo polling. So o trecho final (o id da mensagem em si) e estavel — dedup
+// pelo id completo deixava a mensagem passar duas vezes. Ver 15/10/2026.
+function dedupKeyOf(message) {
+  const key = message?.id;
+  if (key?.id && typeof key.id === 'string') return key.id;
+  const serialized = key?._serialized || key?.$1 || '';
+  if (!serialized) return '';
+  const parts = serialized.split('_');
+  return parts.length >= 3 ? parts[2] : serialized;
+}
+
 function trackProcessedMessage(userId, message) {
-  const id = message?.id?._serialized;
+  const id = dedupKeyOf(message);
   if (!id) return false;
   const key = userScopedKey(userId, id);
   if (processedMessageIds.has(key)) return true;
@@ -346,7 +359,10 @@ async function replyToMessage(userId, client, message, text) {
   trackBotSentBody(userId, text);
 
   try {
-    await client.sendMessage(CHAT_ID, text);
+    // Marca a resposta como ja processada pelo id — a defesa principal contra
+    // o bot ler a propria mensagem; o botSentBodies e a segunda linha.
+    const sent = await client.sendMessage(CHAT_ID, text);
+    trackProcessedMessage(userId, sent);
     return;
   } catch (firstErr) {
     const transient = PUPPETEER_TRANSIENT.test(firstErr?.message || '');
@@ -370,7 +386,7 @@ async function replyToMessage(userId, client, message, text) {
   for (let i = 0; i < attempts.length; i++) {
     await sleep(attempts[i]);
     try {
-      await client.sendMessage(CHAT_ID, text);
+      trackProcessedMessage(userId, await client.sendMessage(CHAT_ID, text));
       console.log(`[bot:${userId}] sendMessage recuperou apos reconnect (tentativa ${i + 1}).`);
       return;
     } catch (error) {
@@ -651,8 +667,10 @@ export async function processIncomingMessage(userId, client, message, source = '
     return;
   }
 
+  // NAO apagar a entrada ao ver a resposta: com evento + polling ela chega
+  // duas vezes, e na segunda o bot tratava a propria resposta como pedido do
+  // usuario — virou um laco em 15/10/2026. O Set ja e limitado a 200.
   if (message.fromMe && message.body && botSentBodies.has(userScopedKey(userId, message.body))) {
-    botSentBodies.delete(userScopedKey(userId, message.body));
     return;
   }
 
@@ -861,7 +879,7 @@ export function startReminderLoop(userId, client) {
         const msg = `Lembrete: *${event.summary}* em ${minutesLeft} minuto${minutesLeft !== 1 ? 's' : ''} (${formatTimeOnly(start, timeZone)})${event.location ? `\nLocal: ${event.location}` : ''}`;
         try {
           trackBotSentBody(userId, msg);
-          await client.sendMessage(CHAT_ID, msg);
+          trackProcessedMessage(userId, await client.sendMessage(CHAT_ID, msg));
         } catch (err) {
           console.error(`[reminder:${userId}] Falha ao enviar lembrete:`, err?.message);
         }
