@@ -9,9 +9,6 @@
 import { getWhatsAppSession, listUsers, markPhoneVerified } from './database.js';
 import { processIncomingMessage, setContactChatId, getContactChatId, startReminderLoop } from './bot.js';
 import { fixMsgId } from './compat.js';
-import pkg from 'whatsapp-web.js';
-
-const { Buttons, List } = pkg;
 
 const digitsOf = value => String(value || '').split('@')[0].replace(/\D/g, '');
 
@@ -136,34 +133,12 @@ export async function attachAllUsersToBot(client) {
   return users.map(u => u.id);
 }
 
-// TEMPORARIO: envia uma mensagem de botoes e uma de lista e registra o que a
-// lib devolve. Remover depois do teste.
-async function sendButtonsTest(client, chatId) {
-  const attempts = [
-    ['botoes', () => new Buttons('Teste de botoes: confirma o agendamento?', [{ id: 'teste-sim', body: 'Agendar' }, { id: 'teste-nao', body: 'Cancelar' }], 'Teste', 'Agenda AI')],
-    ['lista', () => new List('Teste de lista: em qual agenda?', 'Escolher agenda', [{ title: 'Agendas', rows: [{ id: 'teste-1', title: 'Pessoal' }, { id: 'teste-2', title: 'Familia' }, { id: 'teste-3', title: 'Trabalho' }] }], 'Teste', 'Agenda AI')],
-  ];
-  for (const [kind, build] of attempts) {
-    try {
-      const sent = await client.sendMessage(chatId, build());
-      console.log(`[teste-botoes] ${kind}: enviado type=${sent?.type} id=${sent?.id?.id || '?'}`);
-    } catch (err) {
-      console.warn(`[teste-botoes] ${kind}: falhou ao enviar:`, err?.message || err);
-    }
-  }
-}
-
 // Evento 'message' do client do bot: so mensagens recebidas (nao fromMe).
 export async function handleContactMessage(client, message, { sessionStart } = {}) {
   fixMsgId(message);
   if (message.fromMe || message.isStatus) return;
   // So conversas individuais: grupos (@g.us), status e canais ficam de fora.
   if (!/@(c\.us|lid)$/.test(message.from || '')) return;
-  // TEMPORARIO (teste de 16/10/2026): Buttons/List estao descontinuados na lib
-  // e o WhatsApp so os mostra para a Cloud API — ver se um clique chega aqui.
-  if (message.type !== 'chat' && !message.hasMedia) {
-    console.log(`[teste-botoes] Recebido type=${message.type} selectedButtonId=${message.selectedButtonId || '-'} selectedRowId=${message.selectedRowId || '-'}`);
-  }
   // Voto, reacao, aviso de criptografia: nada para o Gemini interpretar.
   if (!message.body && !message.hasMedia) return;
   // Mensagens da janela em que o bot estava fora nao sao reprocessadas.
@@ -182,11 +157,6 @@ export async function handleContactMessage(client, message, { sessionStart } = {
   }
   if (await isPaused(user.id)) {
     console.log(`[agenda-bot] ${user.id} esta pausado; mensagem ignorada.`);
-    return;
-  }
-
-  if (String(message.body || '').trim().toLowerCase() === '#teste-botoes') {
-    await sendButtonsTest(client, message.from);
     return;
   }
 
