@@ -701,9 +701,15 @@ function applyContactMode(status) {
   if (!status?.contactMode) return;
   if (!selfChatConfirmed) revealPhoneFields();
   const number = formatBotNumber(status.botNumber);
-  const talkTo = number
-    ? `Mande mensagem para ${number} no WhatsApp (salve o numero nos contatos).`
-    : 'O numero do bot esta sendo conectado pelo administrador.';
+  let talkTo;
+  if (!number) {
+    talkTo = 'O numero do bot esta sendo conectado pelo administrador.';
+  } else if (status.hasPhone && !status.phoneVerified && status.verifyCode) {
+    // Prova de que o telefone cadastrado e mesmo de quem esta no painel.
+    talkTo = `Para ativar, mande o codigo ${status.verifyCode} para ${number} no WhatsApp, a partir do numero que voce cadastrou.`;
+  } else {
+    talkTo = `Mande mensagem para ${number} no WhatsApp (salve o numero nos contatos).`;
+  }
   STEP4_STATE_COPY.ready.detail = `Pronto. ${talkTo}`;
   const hint = $('ready-contact-hint');
   if (hint) {

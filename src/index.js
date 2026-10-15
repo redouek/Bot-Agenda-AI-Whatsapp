@@ -4,7 +4,7 @@ import pkg from 'whatsapp-web.js';
 import { loadConfig, isPlatformConfigured, isContactMode } from './config.js';
 import { startServer } from './server.js';
 import { registerTranscriber, isTranscriberEnabled } from './transcriber.js';
-import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, startInjectionWatchdog, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
+import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, startInjectionWatchdog, handleCalendarPollVote, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
 import { attachUserToBot, attachAllUsersToBot, handleContactMessage } from './contact.js';
 import { installMsgKeyShim } from './compat.js';
 import {
@@ -369,6 +369,16 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
         await handleContactMessage(client, message, { sessionStart: runtime.readyAt });
       } catch (error) {
         console.error(`[bot:${user.id}] Erro no fluxo de mensagem recebida:`, error);
+      }
+    });
+
+    // Voto na enquete "Em qual agenda?" (bot.js > offerCalendarPoll).
+    client.on('vote_update', async vote => {
+      if (runtime.status !== 'ready') return;
+      try {
+        await handleCalendarPollVote(client, vote);
+      } catch (error) {
+        console.error(`[bot:${user.id}] Erro ao tratar voto:`, error);
       }
     });
   } else {

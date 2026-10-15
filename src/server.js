@@ -16,6 +16,7 @@ import {
   findUserByGoogleSub,
   getDefaultUserId,
   getLatestQr,
+  getPhoneVerifyCode,
   getUser,
   isGoogleConnected,
   listUsers,
@@ -803,6 +804,7 @@ async function handleRequest(req, res, manager) {
         isAdmin: !!u.is_admin,
         phone: u.assistant_chat_id || null,
         selfChatLid: u.self_chat_lid || null,
+        phoneVerified: !!u.phone_verified_at,
         calendarId: u.calendar_id || null,
         calendarConnected: await isGoogleConnected(u.id),
         botStatus: runtime?.status || session?.status || 'stopped',
@@ -869,9 +871,14 @@ async function handleRequest(req, res, manager) {
     // Modo contato: o "bot" do usuario e o numero do bot. A sessao do proprio
     // numero so importa para quem tem transcritor e ainda precisa escanear.
     let botNumber = null;
+    let phoneVerified = true;
+    let verifyCode = null;
     if (isContactMode()) {
       const bot = await manager.getBotStatus();
       botNumber = bot.number;
+      phoneVerified = !!currentUser.phone_verified_at;
+      // So para o dono da sessao: e o codigo que prova a posse do telefone.
+      verifyCode = phoneVerified ? null : await getPhoneVerifyCode(uid);
       const personal = whatsappStatus.status;
       const needsPersonalScan = isTranscriberEnabled(uid) && personal !== 'ready' && personal !== 'stopped';
       if (personal !== 'paused' && !needsPersonalScan) {
@@ -884,6 +891,8 @@ async function handleRequest(req, res, manager) {
       userId: currentUser.id,
       contactMode: isContactMode(),
       botNumber,
+      phoneVerified,
+      verifyCode,
       configComplete: platformConfigured && !!currentUser?.assistant_chat_id,
       platformConfigured,
       hasGeminiKey: !!config.GOOGLE_API_KEY,

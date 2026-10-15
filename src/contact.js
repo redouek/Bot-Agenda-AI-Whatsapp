@@ -6,7 +6,7 @@
 // (users.assistant_chat_id). Qualquer outro numero e ignorado em silencio —
 // responder estranhos expoe a agenda e conta contra o numero no WhatsApp.
 
-import { getWhatsAppSession, listUsers } from './database.js';
+import { getWhatsAppSession, listUsers, markPhoneVerified } from './database.js';
 import { processIncomingMessage, setContactChatId, getContactChatId, startReminderLoop } from './bot.js';
 import { fixMsgId } from './compat.js';
 
@@ -59,15 +59,39 @@ async function senderPhone(client, message) {
   return phone;
 }
 
+// Devolve o usuario dono do remetente, ou os que cadastraram esse telefone
+// sem ainda provar a posse (candidatos a verificacao).
 async function findUserBySender(client, message) {
   const users = (await listUsers()).filter(u => u.assistant_chat_id);
-  // Atalho: o LID do usuario ja conhecido do modo self-chat.
+  // Atalho: o LID do self-chat so existe para quem escaneou o QR com este
+  // numero, e e apagado se o telefone mudar — ja e prova de posse.
   const byLid = users.find(u => u.self_chat_lid && u.self_chat_lid === message.from);
-  if (byLid) return { user: byLid, phone: digitsOf(byLid.assistant_chat_id) };
+  if (byLid) return { user: byLid, phone: digitsOf(byLid.assistant_chat_id), pending: [] };
 
   const phone = await senderPhone(client, message);
-  const user = phone ? users.find(u => samePhone(u.assistant_chat_id, phone)) : null;
-  return { user: user || null, phone };
+  const claims = phone ? users.filter(u => samePhone(u.assistant_chat_id, phone)) : [];
+  return {
+    user: claims.find(u => u.phone_verified_at) || null,
+    phone,
+    pending: claims.filter(u => !u.phone_verified_at),
+  };
+}
+
+// Qualquer conta Google pode digitar qualquer telefone no painel. So vale
+// depois que o codigo mostrado no painel chega DESTE numero.
+async function tryVerifyPhone(client, message, pending) {
+  const body = String(message.body || '');
+  for (const candidate of pending) {
+    const code = candidate.phone_verify_code;
+    if (!code || !new RegExp(`(^|\\D)${code}(\\D|$)`).test(body)) continue;
+    await markPhoneVerified(candidate.id);
+    console.log(`[agenda-bot] Telefone de ${candidate.id} verificado.`);
+    setContactChatId(candidate.id, message.from, candidate.assistant_chat_id);
+    await client.sendMessage(message.from, 'Numero confirmado! Agora e so me mandar o que precisa agendar, por texto ou audio.');
+    await attachUserToBot(client, { ...candidate, phone_verified_at: new Date().toISOString() });
+    return true;
+  }
+  return false;
 }
 
 async function isPaused(userId) {
@@ -77,7 +101,7 @@ async function isPaused(userId) {
 // Fixa o chat do usuario com o bot no id que o WhatsApp reconhece. getNumberId
 // devolve a forma registrada (resolve o 9o digito); sem ele, o telefone cru.
 async function primeContactChat(client, user) {
-  if (getContactChatId(user.id)) return;
+  if (getContactChatId(user.id, user.assistant_chat_id)) return;
   let chatId = '';
   try {
     chatId = (await client.getNumberId(digitsOf(user.assistant_chat_id)))?._serialized || '';
@@ -88,12 +112,12 @@ async function primeContactChat(client, user) {
     console.warn(`[agenda-bot] Telefone de ${user.id} nao encontrado no WhatsApp — lembretes vao para o numero cadastrado.`);
     return;
   }
-  setContactChatId(user.id, chatId);
+  setContactChatId(user.id, chatId, user.assistant_chat_id);
 }
 
 // Liga um usuario ao client do bot: chat resolvido e lembretes rodando.
 export async function attachUserToBot(client, user) {
-  if (!client || !user?.assistant_chat_id) return;
+  if (!client || !user?.assistant_chat_id || !user.phone_verified_at) return;
   if (await isPaused(user.id)) return;
   await primeContactChat(client, user);
   startReminderLoop(user.id, client);
@@ -115,10 +139,17 @@ export async function handleContactMessage(client, message, { sessionStart } = {
   if (message.fromMe || message.isStatus) return;
   // So conversas individuais: grupos (@g.us), status e canais ficam de fora.
   if (!/@(c\.us|lid)$/.test(message.from || '')) return;
+  // Voto, reacao, aviso de criptografia: nada para o Gemini interpretar.
+  if (!message.body && !message.hasMedia) return;
   // Mensagens da janela em que o bot estava fora nao sao reprocessadas.
   if (sessionStart && message.timestamp && message.timestamp * 1000 < sessionStart) return;
 
-  const { user, phone } = await findUserBySender(client, message);
+  const { user, phone, pending } = await findUserBySender(client, message);
+  if (!user && pending.length) {
+    if (await tryVerifyPhone(client, message, pending)) return;
+    console.log(`[agenda-bot] Telefone final ${phone.slice(-4)} cadastrado mas nao verificado; mensagem ignorada.`);
+    return;
+  }
   if (!user) {
     // Final do numero basta para diagnostico sem gravar telefone de terceiro.
     console.log(`[agenda-bot] Mensagem de numero nao cadastrado ignorada (final ${phone ? phone.slice(-4) : '????'}).`);
@@ -130,6 +161,6 @@ export async function handleContactMessage(client, message, { sessionStart } = {
   }
 
   // Primeira mensagem antes do getNumberId resolver: usa o proprio chat.
-  if (!getContactChatId(user.id)) setContactChatId(user.id, message.from);
+  if (!getContactChatId(user.id, user.assistant_chat_id)) setContactChatId(user.id, message.from, user.assistant_chat_id);
   await processIncomingMessage(user.id, client, message, 'contact');
 }

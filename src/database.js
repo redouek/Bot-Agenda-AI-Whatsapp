@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import sqlite3 from 'sqlite3';
@@ -123,6 +124,21 @@ export async function initDatabase() {
     await db.exec('ALTER TABLE users ADD COLUMN football_api_key TEXT');
   } catch {
     // Coluna ja existe
+  }
+
+  // Migration: prova de posse do telefone (modo contato). No self-chat a
+  // prova era escanear o QR com o proprio numero; no modo contato qualquer um
+  // poderia digitar o telefone de outra pessoa no painel. Quem ja tem LID do
+  // self-chat escaneou o QR com aquele numero — entra como verificado.
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN phone_verified_at TEXT');
+    await db.exec('ALTER TABLE users ADD COLUMN phone_verify_code TEXT');
+    await db.run(
+      'UPDATE users SET phone_verified_at = ? WHERE assistant_chat_id IS NOT NULL AND self_chat_lid IS NOT NULL',
+      nowIso()
+    );
+  } catch {
+    // Colunas ja existem
   }
 
   await ensureUser({
@@ -262,7 +278,43 @@ export async function updateUserSettings(userId, settings = {}) {
     [next.name, next.email, next.calendar_id, next.calendar_ids, next.assistant_chat_id, next.self_chat_lid, next.football_api_key, next.timezone, nowIso(), id]
   );
 
+  // Telefone novo nao herda nada do antigo: a verificacao e o LID provavam
+  // posse de OUTRO numero.
+  if ((current.assistant_chat_id || null) !== (next.assistant_chat_id || null)) {
+    await db.run(
+      `UPDATE users SET phone_verified_at = NULL, phone_verify_code = ?, self_chat_lid = ? WHERE id = ?`,
+      next.assistant_chat_id ? newVerifyCode() : null,
+      settings.selfChatLid ?? settings.self_chat_lid ?? null,
+      id
+    );
+  }
+
   return getUser(id);
+}
+
+function newVerifyCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+// Codigo pendente do usuario, gerado sob demanda (telefones cadastrados antes
+// da verificacao existir nao tem um).
+export async function getPhoneVerifyCode(userId) {
+  const db = await getDb();
+  const id = normalizeUserId(userId);
+  const user = await getUser(id);
+  if (!user?.assistant_chat_id || user.phone_verified_at) return null;
+  if (user.phone_verify_code) return user.phone_verify_code;
+  const code = newVerifyCode();
+  await db.run('UPDATE users SET phone_verify_code = ? WHERE id = ?', code, id);
+  return code;
+}
+
+export async function markPhoneVerified(userId) {
+  const db = await getDb();
+  await db.run(
+    'UPDATE users SET phone_verified_at = ?, phone_verify_code = NULL, updated_at = ? WHERE id = ?',
+    nowIso(), nowIso(), normalizeUserId(userId)
+  );
 }
 
 export async function saveGoogleTokens(userId, tokens) {

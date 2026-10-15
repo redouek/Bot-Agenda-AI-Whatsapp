@@ -3,6 +3,9 @@ import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminder
 import { runLookup } from './knowledge.js';
 import { getConfig, isContactMode } from './config.js';
 import { installMsgKeyShim } from './compat.js';
+import pkg from 'whatsapp-web.js';
+
+const { Poll } = pkg;
 import { getUser, updateUserSettings } from './database.js';
 
 const pendingActions = new Map();
@@ -107,6 +110,99 @@ async function formatCalendarOptions(userId) {
   return { ids, text: lines.join('\n') };
 }
 
+// ---------- Enquete de agenda (modo contato) ----------
+// No self-chat os votos nunca chegam a sessao web (testado 5x em 14/10/2026);
+// numa conversa com o numero do bot o voto vem de outra conta, como nos
+// grupos. A enquete e um atalho: responder o numero continua valendo.
+// id curto da enquete -> { userId, chatId, yesCount }. As `yesCount` primeiras
+// opcoes confirmam (a N-esima = agenda N); as demais cancelam. Some quando o
+// pedido se resolve.
+const calendarPolls = new Map();
+
+const shortMsgId = key => key?.id || String(key?._serialized || '').split('_')[2] || '';
+
+// Varias agendas: "Confirma? Em qual agenda?" + uma opcao por agenda +
+// Cancelar. Uma agenda: "Confirmar o agendamento?" + Sim/Nao.
+async function buildConfirmationPoll(userId) {
+  const opts = await formatCalendarOptions(userId);
+  if (!opts) {
+    return { title: 'Confirmar o agendamento?', yes: ['Sim. Agendar'], no: 'Não. Cancelar' };
+  }
+  const names = await getCalendarNameMap(userId);
+  // Opcoes repetidas confundiriam o voto; o numero na frente garante unicas
+  // e deixa claro que responder o numero digitando tambem vale.
+  const yes = opts.ids.map((id, i) => `${i + 1}. ${names.get(id) || shortCalendarLabel(id)}`);
+  return { title: 'Confirma? Em qual agenda?', yes, no: 'Cancelar' };
+}
+
+// Devolve true se a enquete saiu.
+async function offerCalendarPoll(userId, client, chatId) {
+  if (!isContactMode()) return false;
+  const pendingKey = userScopedKey(userId, chatId);
+  const pending = pendingActions.get(pendingKey);
+  if (pending?.type !== 'single_event' && pending?.type !== 'multiple_events') return false;
+
+  const { title, yes, no } = await buildConfirmationPoll(userId);
+  try {
+    const sent = await client.sendMessage(chatId, new Poll(title, [...yes, no]));
+    const pollId = shortMsgId(sent?.id);
+    if (!pollId) return false;
+    trackProcessedMessage(userId, sent);
+    calendarPolls.set(pollId, { userId, chatId, yesCount: yes.length });
+    pending.pollId = pollId;
+    console.log(`[bot:${userId}] Enquete de agenda enviada (${pollId}).`);
+    return true;
+  } catch (err) {
+    console.warn(`[bot:${userId}] Falha ao enviar enquete de agenda:`, err?.message || err);
+    return false;
+  }
+}
+
+// Pede a confirmacao de um agendamento ja guardado em pendingActions. No modo
+// contato sao duas mensagens: os detalhes completos e, em seguida, a enquete
+// de confirmacao. Se a enquete nao sair, a instrucao vai em texto, como no
+// self-chat — nunca fica sem como responder.
+async function sendSchedulingConfirmation(userId, client, message, chatId, pendingAction, prefix = '') {
+  if (isContactMode()) {
+    const details = formatPendingDetails(pendingAction);
+    await replyToMessage(userId, client, message, prefix ? `${prefix}\n\n${details}` : details);
+    if (await offerCalendarPoll(userId, client, chatId)) return;
+    const opts = await formatCalendarOptions(userId);
+    await replyToMessage(userId, client, message, opts
+      ? `Em qual agenda?\n${opts.text}\n\nResponda o numero da agenda para confirmar, ou "nao" para cancelar.`
+      : 'Esta correto? Responda "sim" para agendar ou "nao" para cancelar.');
+    return;
+  }
+  const confirmText = await formatPendingActionForConfirmation(pendingAction, userId);
+  await replyToMessage(userId, client, message, prefix ? `${prefix}\n\n${confirmText}` : confirmText);
+}
+
+// Evento 'vote_update' do client do bot.
+export async function handleCalendarPollVote(client, vote) {
+  const pollId = shortMsgId(vote?.parentMsgKey) || shortMsgId(vote?.parentMessage?.id);
+  const target = calendarPolls.get(pollId);
+  const selected = vote?.selectedOptions || [];
+  console.log(`[bot] vote_update: enquete=${pollId || '?'} conhecida=${!!target} opcoes=${JSON.stringify(selected.map(o => o.localId))}`);
+  if (!target || selected.length !== 1) return; // desmarcou ou enquete alheia
+
+  const { userId, chatId } = target;
+  const pending = pendingActions.get(userScopedKey(userId, chatId));
+  if (!pending || pending.pollId !== pollId) {
+    calendarPolls.delete(pollId); // ja respondida por texto ou substituida
+    return;
+  }
+
+  const localId = selected[0].localId;
+  const confirmation = localId >= target.yesCount
+    ? { decision: 'no', calendarIndex: null }
+    : { decision: 'yes', calendarIndex: localId + 1 };
+  calendarPolls.delete(pollId);
+
+  // handlePendingConfirmation so usa a mensagem como plano B de resposta.
+  const fallbackMessage = { reply: text => client.sendMessage(chatId, text) };
+  await handlePendingConfirmation(userId, client, fallbackMessage, chatId, confirmation);
+}
+
 function formatDateOnly(dateValue, timeZone) {
   // Ex: "qui, 25/05/26"
   const parts = new Intl.DateTimeFormat('pt-BR', {
@@ -132,22 +228,31 @@ function getTimeZone() {
 // Modo contato: o chat do usuario com o numero do bot, como o WhatsApp o
 // identifica (o 9o digito e o @lid fazem o id real divergir do telefone
 // cadastrado). Fica estavel porque pendingActions e indexado por ele.
+// Guarda tambem o telefone para o qual foi resolvido: se o usuario trocar de
+// numero no painel, o chat antigo deixa de valer (senao lembretes seguiriam
+// indo para o numero velho ate o proximo restart).
 const contactChatIdByUser = new Map();
 
-export function setContactChatId(userId, chatId) {
-  if (chatId) contactChatIdByUser.set(userId, chatId);
+export function setContactChatId(userId, chatId, phone) {
+  if (chatId) contactChatIdByUser.set(userId, { chatId, phone: phone || '' });
 }
 
-export function getContactChatId(userId) {
-  return contactChatIdByUser.get(userId) || null;
+export function getContactChatId(userId, phone) {
+  const entry = contactChatIdByUser.get(userId);
+  if (!entry) return null;
+  if (phone !== undefined && entry.phone !== (phone || '')) {
+    contactChatIdByUser.delete(userId);
+    return null;
+  }
+  return entry.chatId;
 }
 
 async function getAssistantChatId(userId) {
+  const user = await getUser(userId);
   if (isContactMode()) {
-    const resolved = contactChatIdByUser.get(userId);
+    const resolved = getContactChatId(userId, user?.assistant_chat_id);
     if (resolved) return resolved;
   }
-  const user = await getUser(userId);
   return user?.assistant_chat_id || '';
 }
 
@@ -157,6 +262,21 @@ export async function hydrateSelfChatLidFromDb(userId) {
     selfChatLidByUser.set(userId, user.self_chat_lid);
     console.log(`[bot:${userId}] LID self-chat carregado do banco: ${user.self_chat_lid}`);
   }
+}
+
+// Os dados do pedido sem cabecalho nem instrucao de resposta — e a pergunta
+// da enquete de agenda.
+function formatPendingDetails(pendingAction) {
+  if (pendingAction?.type === 'multiple_events') {
+    return ['Eventos para confirmar:', ...pendingAction.events.map(event => {
+      const timeZone = event.timeZone || getTimeZone();
+      const line = `• ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`;
+      return event.attendees?.length
+        ? `${line}\n   Convidados (recebem o convite por e-mail): ${event.attendees.join(', ')}`
+        : line;
+    })].join('\n');
+  }
+  return formatSingleEvent(pendingAction.event).split('\n').slice(1).join('\n');
 }
 
 function formatSingleEvent(event) {
@@ -526,6 +646,7 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
           // Pede pra escolher
           const opts = await formatCalendarOptions(userId);
           await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda so o numero da agenda para TODOS os eventos:\n${opts.text}`);
+          await offerCalendarPoll(userId, client, chatId);
           return true;
         }
         targetCalendarId = calendarIds[calendarIndex - 1];
@@ -555,6 +676,7 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
       if (!calendarIndex) {
         const opts = await formatCalendarOptions(userId);
         await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda so o numero da agenda:\n${opts.text}`);
+        await offerCalendarPoll(userId, client, chatId);
         return true;
       }
       targetCalendarId = calendarIds[calendarIndex - 1];
@@ -753,9 +875,7 @@ export async function processIncomingMessage(userId, client, message, source = '
       createdAt: Date.now(),
     };
     pendingActions.set(pendingKey, nextPendingAction);
-    const confirmText = await formatPendingActionForConfirmation(nextPendingAction, userId);
-    const responseText = plan.reply ? `${plan.reply}\n\n${confirmText}` : confirmText;
-    await replyToMessage(userId, client, message, responseText);
+    await sendSchedulingConfirmation(userId, client, message, chatId, nextPendingAction, plan.reply);
     return;
   }
 
@@ -767,9 +887,7 @@ export async function processIncomingMessage(userId, client, message, source = '
       createdAt: Date.now(),
     };
     pendingActions.set(pendingKey, nextPendingAction);
-    const confirmText = await formatPendingActionForConfirmation(nextPendingAction, userId);
-    const responseText = plan.reply ? `${plan.reply}\n\n${confirmText}` : confirmText;
-    await replyToMessage(userId, client, message, responseText);
+    await sendSchedulingConfirmation(userId, client, message, chatId, nextPendingAction, plan.reply);
     return;
   }
 
@@ -882,8 +1000,7 @@ export async function processIncomingMessage(userId, client, message, source = '
       const lookupResult = await runLookup(plan.lookup, userId);
       if (lookupResult.pendingAction) {
         pendingActions.set(pendingKey, lookupResult.pendingAction);
-        const confirmText = await formatPendingActionForConfirmation(lookupResult.pendingAction, userId);
-        await replyToMessage(userId, client, message, `${lookupResult.reply}\n\n${confirmText}`);
+        await sendSchedulingConfirmation(userId, client, message, chatId, lookupResult.pendingAction, lookupResult.reply);
         return;
       }
       await replyToMessage(userId, client, message, lookupResult.reply);
@@ -905,6 +1022,9 @@ export function startReminderLoop(userId, client) {
 
   const interval = setInterval(async () => {
     try {
+      // Modo contato: telefone nao verificado pode ser de outra pessoa, e o
+      // lembrete entregaria a agenda deste usuario a ela.
+      if (isContactMode() && !(await getUser(userId))?.phone_verified_at) return;
       const CHAT_ID = await getAssistantChatId(userId);
       if (!CHAT_ID) return;
 

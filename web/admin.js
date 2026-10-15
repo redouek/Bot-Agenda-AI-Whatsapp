@@ -61,7 +61,8 @@ async function loadUsers() {
     const escape = (s) => String(s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
     const rows = users.map(u => {
       const statusLabel = STATUS_LABELS[u.botStatus] || u.botStatus;
-      const lidBadge = u.selfChatLid ? '<span class="badge ok">LID OK</span>' : '<span class="badge warn">LID pendente</span>';
+      const lidBadge = (u.selfChatLid ? '<span class="badge ok">LID OK</span>' : '<span class="badge warn">LID pendente</span>')
+        + (u.phone ? (u.phoneVerified ? ' <span class="badge ok">Tel. verificado</span>' : ' <span class="badge warn">Tel. nao verificado</span>') : '');
       const calBadge = u.calendarConnected ? '<span class="badge ok">Calendar OK</span>' : '<span class="badge warn">Sem Calendar</span>';
       const isPaused = u.botStatus === 'paused';
       const pauseBtn = isPaused
