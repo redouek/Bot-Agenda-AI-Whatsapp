@@ -690,6 +690,28 @@ function revealPhoneFields() {
   if (fields) fields.classList.remove('hidden');
 }
 
+function formatBotNumber(number) {
+  if (!number) return '';
+  return '+' + String(number).replace(/^(\d{2})(\d{2})(\d{4,5})(\d{4})$/, '$1 $2 $3-$4');
+}
+
+// Modo contato: a agenda e um contato (o numero do bot), nao o self-chat. O
+// passo "mande mensagem para voce mesmo" deixa de existir.
+function applyContactMode(status) {
+  if (!status?.contactMode) return;
+  if (!selfChatConfirmed) revealPhoneFields();
+  const number = formatBotNumber(status.botNumber);
+  const talkTo = number
+    ? `Mande mensagem para ${number} no WhatsApp (salve o numero nos contatos).`
+    : 'O numero do bot esta sendo conectado pelo administrador.';
+  STEP4_STATE_COPY.ready.detail = `Pronto. ${talkTo}`;
+  const hint = $('ready-contact-hint');
+  if (hint) {
+    hint.textContent = talkTo;
+    hint.classList.remove('hidden');
+  }
+}
+
 async function loadSession() {
   try {
     const res = await fetch('/api/session');
@@ -750,6 +772,7 @@ async function pollStatus() {
     const status = await res.json();
     currentStatus = status;
     if (status.userId) currentUserId = status.userId;
+    applyContactMode(status);
 
     updateStatusLabel(status.botStatus);
     updateOAuthButton(latestConfig);

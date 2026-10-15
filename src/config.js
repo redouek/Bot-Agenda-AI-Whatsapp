@@ -49,6 +49,13 @@ export function isPlatformConfigured() {
   );
 }
 
+// AGENDA_MODE=contact: a agenda atende pelo numero proprio do bot, e cada
+// usuario conversa com ele como um contato normal. Sem a variavel, vale o modo
+// original (cada usuario fala com a agenda no proprio self-chat) — e o rollback.
+export function isContactMode() {
+  return String(process.env.AGENDA_MODE || '').trim().toLowerCase() === 'contact';
+}
+
 export function isConfigComplete() {
   return isPlatformConfigured();
 }

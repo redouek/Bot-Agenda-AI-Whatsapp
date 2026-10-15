@@ -4,10 +4,12 @@ import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import qrcode from 'qrcode';
-import { getConfig, setConfig, isPlatformConfigured } from './config.js';
+import { getConfig, setConfig, isPlatformConfigured, isContactMode } from './config.js';
 import { getAuthUrl, getLoginAuthUrl, exchangeCodeForLogin, exchangeCodeForTokens, listCalendars } from './calendar.js';
 import { getSelfChatHealth } from './bot.js';
+import { isTranscriberEnabled } from './transcriber.js';
 import {
+  BOT_SESSION_ID,
   countAdmins,
   ensureUser,
   findUserByEmail,
@@ -187,23 +189,50 @@ async function buildHealthPayload(manager) {
   const users = await listUsers();
   const now = Date.now();
 
+  // Ler o self-chat (ou, no modo contato, o vigia da injecao ter rodado) nao
+  // e so 'ready': sem window.WWebJS o bot le e nao consegue responder (estado
+  // em que ficou de 24/09 a 08/10/2026 dando 'healthy').
+  const sessionOk = id => {
+    const poll = getSelfChatHealth(id);
+    return {
+      ok: !!poll.lastOkAt && (now - poll.lastOkAt) < POLL_STALE_MS && poll.injectionOk !== false,
+      lastError: poll.lastError || null,
+    };
+  };
+
   // So conta quem concluiu o onboarding e nao foi pausado de proposito:
   // usuario sem telefone nao e falha, e 'paused' e decisao do usuario.
   const monitored = [];
+  let botDown = false;
+  if (isContactMode()) {
+    // A agenda de todos depende do numero do bot: ele fora e servico fora.
+    const bot = await manager.getBotStatus();
+    const health = sessionOk(BOT_SESSION_ID);
+    const ready = bot.status === 'ready';
+    botDown = !(ready && health.ok);
+    monitored.push({ status: `bot:${bot.status}`, ready, selfChatOk: health.ok, lastPollError: health.lastError });
+  }
   for (const user of users) {
     if (!user.assistant_chat_id) continue;
     const session = await getWhatsAppSession(user.id);
     if (session?.status === 'paused') continue;
 
+    if (isContactMode()) {
+      // No modo contato a sessao do usuario so existe para o transcritor.
+      if (!isTranscriberEnabled(user.id)) continue;
+      const runtime = await manager.getWhatsAppStatus(user.id);
+      const ready = runtime.status === 'ready';
+      monitored.push({ status: `transcritor:${runtime.status}`, ready, selfChatOk: ready, lastPollError: null });
+      continue;
+    }
+
     const runtime = await manager.getWhatsAppStatus(user.id);
-    const poll = getSelfChatHealth(user.id);
+    const health = sessionOk(user.id);
     monitored.push({
       status: runtime.status,
       ready: runtime.status === 'ready',
-      // Ler o self-chat nao basta: sem window.WWebJS o bot le e nao consegue
-      // responder (estado em que ficou de 24/09 a 08/10/2026 dando 'healthy').
-      selfChatOk: !!poll.lastOkAt && (now - poll.lastOkAt) < POLL_STALE_MS && poll.injectionOk !== false,
-      lastPollError: poll.lastError || null,
+      selfChatOk: health.ok,
+      lastPollError: health.lastError,
     });
   }
 
@@ -216,7 +245,7 @@ async function buildHealthPayload(manager) {
 
   // Todo mundo que deveria estar atendendo esta fora: mesmo com as checagens
   // de plataforma passando, na pratica o servico nao entrega nada.
-  const allUsersDown = total > 0 && healthy === 0;
+  const allUsersDown = (total > 0 && healthy === 0) || botDown;
 
   let status;
   if (hardDown || allUsersDown) status = 'down';
@@ -229,7 +258,8 @@ async function buildHealthPayload(manager) {
   if (!checks.config.ok) reasons.push('credenciais incompletas');
   if (!checks.chromium.ok) reasons.push(`vazamento de Chromium (${checks.chromium.leaked})`);
   if (!checks.memory.ok) reasons.push(`memoria baixa (${checks.memory.availableMb} MB)`);
-  if (allUsersDown) reasons.push('nenhum usuario operante');
+  if (botDown) reasons.push('numero do bot fora');
+  else if (allUsersDown) reasons.push('nenhum usuario operante');
   else if (healthy < total) reasons.push(`${total - healthy} de ${total} usuario(s) fora`);
 
   const payload = {
@@ -737,6 +767,29 @@ async function handleRequest(req, res, manager) {
     }
   }
 
+  // ---------- Numero do bot (modo contato) ----------
+  if (pathname === '/api/admin/bot' && req.method === 'GET') {
+    if (!(await requireAdminApi(req, res))) return;
+    const bot = await manager.getBotStatus();
+    let qrSvg = null;
+    if (bot.qr) {
+      try { qrSvg = await qrcode.toString(bot.qr, { type: 'svg' }); } catch {}
+    }
+    return json(res, { ...bot, qr: qrSvg });
+  }
+
+  if (pathname === '/api/admin/bot/restart' && req.method === 'POST') {
+    if (!(await requireAdminApi(req, res))) return;
+    manager.restartBot().catch(err => console.error('[server] Erro ao reiniciar o numero do bot:', err));
+    return json(res, { ok: true });
+  }
+
+  if (pathname === '/api/admin/bot/logout' && req.method === 'POST') {
+    if (!(await requireAdminApi(req, res))) return;
+    manager.logoutBot().catch(err => console.error('[server] Erro ao desvincular o numero do bot:', err));
+    return json(res, { ok: true });
+  }
+
   if (pathname === '/api/admin/users' && req.method === 'GET') {
     if (!(await requireAdminApi(req, res))) return;
     const users = await listUsers();
@@ -812,8 +865,25 @@ async function handleRequest(req, res, manager) {
     const whatsappStatus = await manager.getWhatsAppStatus(uid);
     const config = getConfig();
     const platformConfigured = isPlatformConfigured();
+
+    // Modo contato: o "bot" do usuario e o numero do bot. A sessao do proprio
+    // numero so importa para quem tem transcritor e ainda precisa escanear.
+    let botNumber = null;
+    if (isContactMode()) {
+      const bot = await manager.getBotStatus();
+      botNumber = bot.number;
+      const personal = whatsappStatus.status;
+      const needsPersonalScan = isTranscriberEnabled(uid) && personal !== 'ready' && personal !== 'stopped';
+      if (personal !== 'paused' && !needsPersonalScan) {
+        whatsappStatus.status = currentUser.assistant_chat_id ? bot.status : 'stopped';
+        whatsappStatus.qrAvailable = false;
+      }
+    }
+
     return json(res, {
       userId: currentUser.id,
+      contactMode: isContactMode(),
+      botNumber,
       configComplete: platformConfigured && !!currentUser?.assistant_chat_id,
       platformConfigured,
       hasGeminiKey: !!config.GOOGLE_API_KEY,

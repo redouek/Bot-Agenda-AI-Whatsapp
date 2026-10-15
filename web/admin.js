@@ -111,6 +111,56 @@ async function loadUsers() {
   }
 }
 
+const botPanel = document.getElementById('bot-panel');
+const botSummary = document.getElementById('bot-summary');
+const botQr = document.getElementById('bot-qr');
+const botQrContainer = document.getElementById('bot-qr-container');
+
+function formatBotNumber(number) {
+  if (!number) return '';
+  return '+' + String(number).replace(/^(\d{2})(\d{2})(\d{4,5})(\d{4})$/, '$1 $2 $3-$4');
+}
+
+async function loadBot() {
+  try {
+    const res = await fetch('/api/admin/bot', { credentials: 'include' });
+    if (!res.ok) return;
+    const bot = await res.json();
+    botPanel.classList.toggle('hidden', !bot.contactMode);
+    if (!bot.contactMode) return;
+
+    const label = STATUS_LABELS[bot.status] || bot.status;
+    const number = bot.number ? ` — ${formatBotNumber(bot.number)}` : '';
+    const since = bot.status === 'ready' && bot.lastReadyAt ? ` (desde ${formatDate(bot.lastReadyAt)})` : '';
+    botSummary.textContent = `${label}${number}${since}`;
+    botSummary.classList.toggle('loading', bot.status !== 'ready');
+
+    botQr.classList.toggle('hidden', !bot.qr);
+    if (bot.qr) botQrContainer.innerHTML = bot.qr;
+  } catch {
+    botSummary.textContent = 'Erro ao consultar o numero do bot.';
+  }
+}
+
+async function botAction(path, confirmText) {
+  if (confirmText && !confirm(confirmText)) return;
+  try {
+    const res = await fetch(path, { method: 'POST', credentials: 'include' });
+    if (res.status === 401) { stopPolling(); show('login'); return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    botSummary.textContent = 'Aguarde...';
+    setTimeout(loadBot, 3000);
+  } catch (err) {
+    alert('Erro: ' + err.message);
+  }
+}
+
+document.getElementById('btn-bot-restart')?.addEventListener('click', () => botAction('/api/admin/bot/restart'));
+document.getElementById('btn-bot-logout')?.addEventListener('click', () => botAction(
+  '/api/admin/bot/logout',
+  'Desvincular o numero atual do bot?\n\nA agenda para de responder ate alguem escanear o QR novo com o numero que vai atender.'
+));
+
 async function handleUserAction(btn) {
   const action = btn.dataset.action;
   const userId = btn.dataset.uid;
@@ -174,7 +224,8 @@ async function loadConfig() {
 
 function startPolling() {
   if (pollHandle) return;
-  pollHandle = setInterval(loadUsers, 15000);
+  // 5s por causa do QR do bot: ele expira em ~20s.
+  pollHandle = setInterval(() => { loadBot(); loadUsers(); }, 5000);
 }
 
 function stopPolling() {
@@ -186,6 +237,7 @@ function stopPolling() {
 async function enterAuthedMode() {
   show('authed');
   await loadConfig();
+  await loadBot();
   await loadUsers();
   startPolling();
 }

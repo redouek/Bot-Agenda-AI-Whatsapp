@@ -59,6 +59,22 @@
 
       <div id="admin-content" class="hidden">
 
+      <section id="bot-panel" class="panel hidden">
+        <div class="panel-heading">
+          <p class="eyebrow">Modo contato</p>
+          <h3>Numero do bot</h3>
+        </div>
+        <p id="bot-summary" class="loading">Carregando...</p>
+        <div id="bot-qr" class="hidden">
+          <p>No celular do numero do bot: WhatsApp &gt; Aparelhos conectados &gt; Conectar um aparelho, e escaneie:</p>
+          <div id="bot-qr-container" class="qr-standalone"></div>
+        </div>
+        <div class="form-footer">
+          <button type="button" class="btn-ghost" id="btn-bot-restart">Reiniciar</button>
+          <button type="button" class="btn-ghost" id="btn-bot-logout">Trocar numero</button>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="panel-heading">
           <p class="eyebrow">Status</p>

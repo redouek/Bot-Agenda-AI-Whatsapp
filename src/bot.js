@@ -1,7 +1,8 @@
 import { planConversationTurn, friendlyAiError } from './gemini.js';
 import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminders, getCalendarIds, listCalendars } from './calendar.js';
 import { runLookup } from './knowledge.js';
-import { getConfig } from './config.js';
+import { getConfig, isContactMode } from './config.js';
+import { installMsgKeyShim } from './compat.js';
 import { getUser, updateUserSettings } from './database.js';
 
 const pendingActions = new Map();
@@ -128,7 +129,24 @@ function getTimeZone() {
   return getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
 }
 
+// Modo contato: o chat do usuario com o numero do bot, como o WhatsApp o
+// identifica (o 9o digito e o @lid fazem o id real divergir do telefone
+// cadastrado). Fica estavel porque pendingActions e indexado por ele.
+const contactChatIdByUser = new Map();
+
+export function setContactChatId(userId, chatId) {
+  if (chatId) contactChatIdByUser.set(userId, chatId);
+}
+
+export function getContactChatId(userId) {
+  return contactChatIdByUser.get(userId) || null;
+}
+
 async function getAssistantChatId(userId) {
+  if (isContactMode()) {
+    const resolved = contactChatIdByUser.get(userId);
+    if (resolved) return resolved;
+  }
   const user = await getUser(userId);
   return user?.assistant_chat_id || '';
 }
@@ -644,20 +662,25 @@ async function handlePendingChooseAll(userId, client, message, chatId) {
 // 'event:message' ou 'poll'. Serve para decidir se o polling do self-chat
 // (workaround acoplado a interno da lib) ainda e necessario — se o evento
 // vencer o dedup de forma consistente, o polling e redundante.
+// 'contact' vem do numero proprio do bot: contact.js ja identificou o
+// remetente como este usuario, entao nao ha self-chat a conferir.
 export async function processIncomingMessage(userId, client, message, source = 'desconhecido') {
   // Verifica self-chat ANTES do dedup (evita adicionar ID e bloquear polling depois)
   let chat;
   try {
     chat = await message.getChat();
-  } catch {
+  } catch (err) {
+    if (source === 'contact') console.warn(`[bot:${userId}] getChat falhou:`, err?.message || err);
     return;
   }
 
   const rawChatId = chat?.id?._serialized || '';
   const CHAT_ID = await getAssistantChatId(userId);
-  const selfLid = selfChatLidByUser.get(userId);
-  const isSelfChat = rawChatId === CHAT_ID || (selfLid && rawChatId === selfLid);
-  if (!isSelfChat) return;
+  if (source !== 'contact') {
+    const selfLid = selfChatLidByUser.get(userId);
+    const isSelfChat = rawChatId === CHAT_ID || (selfLid && rawChatId === selfLid);
+    if (!isSelfChat) return;
+  }
 
   // Ignora mensagens enviadas ANTES da sessao atual ficar pronta
   // (evita que retomar de pausa reprocesse mensagens do periodo offline).
@@ -1250,6 +1273,64 @@ export function startSelfChatPolling(userId, client, { onInjectionLost } = {}) {
 
   pollIntervals.set(userId, interval);
   console.log(`[poll:${userId}] Polling de self-chat iniciado (4s).`);
+}
+
+// Modo contato: sem self-chat nao ha polling, mas os dois riscos que ele
+// vigiava continuam — a pagina recarrega e perde a injecao da lib (bot le e
+// nao responde, ver INJECTION_GRACE_MS) ou perde o shim do MsgKey (getChat e
+// reply quebram). A cada tick reinstala o shim e confere a injecao; a saude
+// fica no mesmo pollHealthByUser que o /api/health ja le.
+export function startInjectionWatchdog(sessionId, client, { onInjectionLost } = {}) {
+  if (pollIntervals.has(sessionId)) stopSelfChatPolling(sessionId);
+  let injectionLostAt = 0;
+  let injectionLostReported = false;
+
+  const interval = setInterval(async () => {
+    let wwebjsOk = null;
+    try {
+      wwebjsOk = await client.pupPage.evaluate(() => typeof window.WWebJS?.getChat === 'function');
+    } catch { /* pagina navegando: inconclusivo */ }
+
+    const now = Date.now();
+    if (wwebjsOk === false) {
+      if (!injectionLostAt) {
+        injectionLostAt = now;
+        console.warn(`[watchdog:${sessionId}] window.WWebJS ausente — aguardando reinjecao da lib.`);
+      }
+      pollHealthByUser.set(sessionId, {
+        ...(pollHealthByUser.get(sessionId) || {}),
+        injectionOk: false,
+        lastError: 'window.WWebJS ausente (envio indisponivel)',
+        lastErrorAt: now,
+      });
+      if (now - injectionLostAt >= INJECTION_GRACE_MS && !injectionLostReported) {
+        injectionLostReported = true;
+        console.error(`[watchdog:${sessionId}] window.WWebJS ausente ha ${Math.round((now - injectionLostAt) / 1000)}s — reiniciando instancia.`);
+        onInjectionLost?.('window.WWebJS ausente');
+      }
+      return;
+    }
+    if (wwebjsOk !== true) return;
+
+    if (injectionLostAt) {
+      console.log(`[watchdog:${sessionId}] window.WWebJS restaurado apos ${Math.round((now - injectionLostAt) / 1000)}s.`);
+      injectionLostAt = 0;
+      injectionLostReported = false;
+    }
+    try {
+      await installMsgKeyShim(client);
+    } catch (err) {
+      console.warn(`[watchdog:${sessionId}] Falha ao reinstalar o shim do MsgKey:`, err?.message || err);
+    }
+    pollHealthByUser.set(sessionId, {
+      ...(pollHealthByUser.get(sessionId) || {}),
+      injectionOk: true,
+      lastOkAt: now,
+    });
+  }, 15_000);
+
+  pollIntervals.set(sessionId, interval);
+  console.log(`[watchdog:${sessionId}] Vigia da injecao iniciado (15s).`);
 }
 
 export function stopSelfChatPolling(userId) {

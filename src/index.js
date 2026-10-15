@@ -1,12 +1,16 @@
 import fs from 'fs';
 import path from 'path';
 import pkg from 'whatsapp-web.js';
-import { loadConfig, isPlatformConfigured } from './config.js';
+import { loadConfig, isPlatformConfigured, isContactMode } from './config.js';
 import { startServer } from './server.js';
-import { registerTranscriber } from './transcriber.js';
-import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
+import { registerTranscriber, isTranscriberEnabled } from './transcriber.js';
+import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, startInjectionWatchdog, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
+import { attachUserToBot, attachAllUsersToBot, handleContactMessage } from './contact.js';
+import { installMsgKeyShim } from './compat.js';
 import {
+  BOT_SESSION_ID,
   deleteUser,
+  ensureBotSessionRecord,
   ensureUser,
   getDefaultUserId,
   getWhatsAppSession,
@@ -151,11 +155,60 @@ export async function getOrCreateCurrentUser(userId = getDefaultUserId()) {
   });
 }
 
+// Papel de cada sessao do WhatsApp:
+//   selfchat    — modo original: a sessao e o numero do usuario e faz tudo
+//                 (agenda no self-chat + transcritor nas outras conversas);
+//   bot         — modo contato: o numero proprio do bot, so a agenda;
+//   transcriber — modo contato: o numero do usuario, so o transcritor (ele
+//                 precisa responder na conversa onde o audio chegou).
+function roleOf(id) {
+  if (!isContactMode()) return 'selfchat';
+  return id === BOT_SESSION_ID ? 'bot' : 'transcriber';
+}
+
+function getBotClient() {
+  const runtime = whatsappInstances.get(BOT_SESSION_ID);
+  return runtime?.status === 'ready' ? runtime.client : null;
+}
+
+// Para tudo que roda em funcao de uma sessao. A do bot carrega os lembretes
+// de todos os usuarios; nos outros papeis cada um carrega o seu.
+async function stopSessionLoops(id) {
+  stopSelfChatPolling(id);
+  clearSessionStart(id);
+  if (roleOf(id) === 'bot') {
+    for (const u of await listUsers()) stopReminderLoop(u.id);
+  } else {
+    stopReminderLoop(id);
+  }
+}
+
 export async function startWhatsAppInstance(userId = getDefaultUserId()) {
-  const user = await getOrCreateCurrentUser(userId);
+  const role = roleOf(userId);
+  const user = role === 'bot' ? await ensureBotSessionRecord() : await getOrCreateCurrentUser(userId);
   const existing = getExistingRuntime(user.id);
 
-  if (!user.assistant_chat_id) {
+  if (role === 'transcriber' && user.assistant_chat_id) {
+    // Chamar esta funcao e ativar o usuario (retomar, salvar o telefone): tira
+    // a pausa antes, senao attachUserToBot recusaria por ela.
+    if ((await getWhatsAppSession(user.id))?.status === 'paused') {
+      await updateWhatsAppSession(user.id, { status: 'stopped', latestQr: null });
+    }
+    // A agenda deste usuario roda no client do bot; aqui so liga a ele. Se o
+    // bot ainda nao esta pronto, o 'ready' dele faz isso para todos.
+    await attachUserToBot(getBotClient(), user);
+    if (!isTranscriberEnabled(user.id)) {
+      // Sem transcritor, nao ha por que abrir um WhatsApp no numero dele.
+      if (existing) {
+        await destroyRuntime(existing, 'modo contato sem transcritor');
+        whatsappInstances.delete(user.id);
+      }
+      await updateWhatsAppSession(user.id, { status: 'stopped', latestQr: null });
+      return { userId: user.id, client: null, status: 'stopped', qr: null, sessionPath: getWhatsAppSessionPath(user.id) };
+    }
+  }
+
+  if (role !== 'bot' && !user.assistant_chat_id) {
     console.log(`[index] Usuario ${user.id} ainda nao informou telefone. WhatsApp nao sera iniciado.`);
     await updateWhatsAppSession(user.id, { status: 'stopped', latestQr: null });
     return {
@@ -213,6 +266,7 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
 
   const runtime = {
     userId: user.id,
+    role,
     client,
     status: 'initializing',
     qr: null,
@@ -236,25 +290,43 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     await updateWhatsAppSession(user.id, { status: 'authenticated', latestQr: null, sessionPath });
   });
 
+  const onInjectionLost = reason => {
+    recoverWhatsAppInstance(user.id, runtime, reason).catch(err => {
+      console.error(`[index] Recuperacao de ${user.id} falhou:`, err?.message || err);
+    });
+  };
+
   client.on('ready', async () => {
-    console.log(`[bot:${user.id}] WhatsApp pronto.`);
+    console.log(`[bot:${user.id}] WhatsApp pronto (${role}).`);
+    // O shim antes do status: com 'ready' publicado, mensagens ja podem
+    // chegar, e sem ele getChat()/reply() quebram (ver compat.js).
+    if (role === 'bot') {
+      try {
+        console.log(`[bot:${user.id}] compat MsgKey._serialized: ${await installMsgKeyShim(client)}`);
+      } catch (err) {
+        console.warn(`[bot:${user.id}] compat MsgKey._serialized falhou:`, err?.message || err);
+      }
+    }
     runtime.status = 'ready';
     runtime.qr = null;
-    setSessionStart(user.id);
+    runtime.number = client.info?.wid?.user || null;
+    runtime.readyAt = Date.now();
+    setSessionStart(user.id, runtime.readyAt);
     await updateWhatsAppSession(user.id, {
       status: 'ready',
       latestQr: null,
       sessionPath,
       lastReadyAt: new Date().toISOString(),
     });
-    startReminderLoop(user.id, client);
-    startSelfChatPolling(user.id, client, {
-      onInjectionLost: reason => {
-        recoverWhatsAppInstance(user.id, runtime, reason).catch(err => {
-          console.error(`[index] Recuperacao de ${user.id} falhou:`, err?.message || err);
-        });
-      },
-    });
+
+    if (role === 'selfchat') {
+      startReminderLoop(user.id, client);
+      startSelfChatPolling(user.id, client, { onInjectionLost });
+    } else if (role === 'bot') {
+      startInjectionWatchdog(user.id, client, { onInjectionLost });
+      const attached = await attachAllUsersToBot(client);
+      console.log(`[bot:${user.id}] Numero ${runtime.number || '?'} atendendo ${attached.length} usuario(s).`);
+    }
   });
 
   client.on('auth_failure', async error => {
@@ -267,31 +339,43 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
     console.warn(`[bot:${user.id}] WhatsApp desconectado:`, reason);
     runtime.status = 'disconnected';
     runtime.qr = null;
-    stopReminderLoop(user.id);
-    stopSelfChatPolling(user.id);
-    clearSessionStart(user.id);
+    await stopSessionLoops(user.id);
     await updateWhatsAppSession(user.id, { status: 'disconnected', latestQr: null, sessionPath });
   });
 
-  client.on('message', async message => {
-    try {
-      await processIncomingMessage(user.id, client, message, 'event:message');
-    } catch (error) {
-      console.error(`[bot:${user.id}] Erro no fluxo de message:`, error);
-    }
-  });
+  if (role === 'selfchat') {
+    client.on('message', async message => {
+      try {
+        await processIncomingMessage(user.id, client, message, 'event:message');
+      } catch (error) {
+        console.error(`[bot:${user.id}] Erro no fluxo de message:`, error);
+      }
+    });
 
-  client.on('message_create', async message => {
-    try {
-      await processIncomingMessage(user.id, client, message, 'event:message_create');
-    } catch (error) {
-      console.error(`[bot:${user.id}] Erro no fluxo de message_create:`, error);
-    }
-  });
+    client.on('message_create', async message => {
+      try {
+        await processIncomingMessage(user.id, client, message, 'event:message_create');
+      } catch (error) {
+        console.error(`[bot:${user.id}] Erro no fluxo de message_create:`, error);
+      }
+    });
+  }
 
-  // Transcricao de audio sob demanda nas conversas que NAO sao o self-chat.
-  // So liga para quem esta em TRANSCRIBER_USERS — ver transcriber.js.
-  registerTranscriber(user.id, client);
+  if (role === 'bot') {
+    // So 'message' (recebidas): o que o proprio bot envia nao e pedido.
+    client.on('message', async message => {
+      if (runtime.status !== 'ready') return;
+      try {
+        await handleContactMessage(client, message, { sessionStart: runtime.readyAt });
+      } catch (error) {
+        console.error(`[bot:${user.id}] Erro no fluxo de mensagem recebida:`, error);
+      }
+    });
+  } else {
+    // Transcricao de audio sob demanda nas conversas que NAO sao o self-chat.
+    // So liga para quem esta em TRANSCRIBER_USERS — ver transcriber.js.
+    registerTranscriber(user.id, client);
+  }
 
   try {
     await initializeWithWatchdog(client, runtime, INIT_TIMEOUT_MS);
@@ -327,9 +411,7 @@ async function recoverWhatsAppInstance(userId, runtime, reason) {
   lastRecoveryAt.set(userId, Date.now());
   console.warn(`[index] Recuperando instancia de ${userId}: ${reason}`);
 
-  stopReminderLoop(userId);
-  stopSelfChatPolling(userId);
-  clearSessionStart(userId);
+  await stopSessionLoops(userId);
   await destroyRuntime(runtime, `recuperacao: ${reason}`);
   whatsappInstances.delete(userId);
   await startWhatsAppInstance(userId);
@@ -339,9 +421,7 @@ export async function stopWhatsAppInstance(userId = getDefaultUserId(), finalSta
   const runtime = whatsappInstances.get(userId);
   await destroyRuntime(runtime, `parada solicitada (${finalStatus})`);
 
-  stopReminderLoop(userId);
-  stopSelfChatPolling(userId);
-  clearSessionStart(userId);
+  await stopSessionLoops(userId);
   whatsappInstances.delete(userId);
   await updateWhatsAppSession(userId, { status: finalStatus, latestQr: null });
 }
@@ -363,9 +443,7 @@ export async function logoutWhatsAppInstance(userId = getDefaultUserId()) {
     // logout() nao fecha o browser — sem destroy o Chromium fica orfao.
     await destroyRuntime(runtime, 'logout');
   }
-  stopReminderLoop(userId);
-  stopSelfChatPolling(userId);
-  clearSessionStart(userId);
+  await stopSessionLoops(userId);
   whatsappInstances.delete(userId);
 
   // Remove arquivos da sessao em disco
@@ -396,12 +474,48 @@ export async function getWhatsAppStatus(userId = getDefaultUserId()) {
   };
 }
 
+// ---------- Numero do bot (modo contato), controlado pelo painel admin ----------
+
+export async function getBotStatus() {
+  const runtime = whatsappInstances.get(BOT_SESSION_ID);
+  const session = await getWhatsAppSession(BOT_SESSION_ID);
+  return {
+    contactMode: isContactMode(),
+    status: runtime?.status || session?.status || 'stopped',
+    qr: runtime?.qr || null,
+    number: runtime?.number || null,
+    lastReadyAt: session?.last_ready_at || null,
+  };
+}
+
+export async function restartBot() {
+  if (!isContactMode()) throw new Error('modo contato desligado (AGENDA_MODE)');
+  await stopWhatsAppInstance(BOT_SESSION_ID);
+  return startWhatsAppInstance(BOT_SESSION_ID);
+}
+
+// Desvincula o numero atual e ja abre um QR novo — e assim que se troca o
+// numero do bot.
+export async function logoutBot() {
+  if (!isContactMode()) throw new Error('modo contato desligado (AGENDA_MODE)');
+  await logoutWhatsAppInstance(BOT_SESSION_ID);
+  return startWhatsAppInstance(BOT_SESSION_ID);
+}
+
 async function startConfiguredInstances() {
   await getOrCreateCurrentUser();
 
   if (!isPlatformConfigured()) {
     console.log('[index] Configuracao incompleta. Acesse o painel web para configurar.');
     return;
+  }
+
+  if (isContactMode()) {
+    console.log('[index] Modo contato: a agenda atende pelo numero proprio do bot.');
+    await ensureBotSessionRecord();
+    startWhatsAppInstance(BOT_SESSION_ID).catch(err => {
+      console.error('[index] Erro ao iniciar o numero do bot:', err);
+    });
   }
 
   const users = await listUsers();
@@ -438,6 +552,9 @@ async function main() {
     logoutWhatsAppInstance,
     deleteUser,
     updateUserSettings,
+    getBotStatus,
+    restartBot,
+    logoutBot,
   });
 
   await startConfiguredInstances();

@@ -7,6 +7,12 @@ const DB_PATH = process.env.DB_PATH || path.resolve('./data/app.sqlite');
 const DEFAULT_USER_ID = process.env.DEFAULT_USER_ID || 'renato';
 const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME || 'Renato';
 
+// Sessao do numero proprio do bot (modo contato, ver contact.js). Vive como um
+// registro em `users` so para reaproveitar whatsapp_sessions e a pasta de
+// sessao; ids com "__" nao sao gente e ficam fora de listUsers().
+export const BOT_SESSION_ID = '__agenda_bot__';
+const isInternalId = id => String(id || '').startsWith('__');
+
 let dbPromise = null;
 
 function ensureDataDir() {
@@ -204,7 +210,12 @@ export async function deleteUser(userId) {
 
 export async function listUsers() {
   const db = await getDb();
-  return db.all('SELECT * FROM users ORDER BY created_at ASC');
+  const rows = await db.all('SELECT * FROM users ORDER BY created_at ASC');
+  return rows.filter(u => !isInternalId(u.id));
+}
+
+export async function ensureBotSessionRecord() {
+  return ensureUser({ id: BOT_SESSION_ID, name: 'Numero do bot' });
 }
 
 export async function updateUserSettings(userId, settings = {}) {
