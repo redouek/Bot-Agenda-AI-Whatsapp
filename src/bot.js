@@ -455,7 +455,15 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
 
   if (decision === 'no') {
     pendingActions.delete(pendingKey);
-    await replyToMessage(userId, client, message, 'Agendamento cancelado.');
+    // "nao" significa coisas opostas conforme o pedido: num agendamento, nao
+    // criar; num cancelamento, MANTER o evento. Responder "Agendamento
+    // cancelado." ao manter um evento dava a entender o contrario.
+    const keptMsg = pending.type === 'cancel_event'
+      ? `Ok, mantive "${pending.summary}" na agenda.`
+      : pending.type === 'cancel_multiple' || pending.type === 'choice'
+        ? 'Ok, nao cancelei nada. Seus eventos continuam na agenda.'
+        : 'Ok, nao agendei.';
+    await replyToMessage(userId, client, message, keptMsg);
     return true;
   }
 
@@ -603,7 +611,7 @@ async function handlePendingChoice(userId, client, message, chatId, index) {
     const timeStr = start && start.includes('T') ? formatTimeOnly(start, timeZone) : '';
     await replyToMessage(
       userId, client, message,
-      `Quer cancelar "${choice.summary}" (${formatDateOnly(start, timeZone)}${timeStr ? ' ' + timeStr : ''})?\nResponda "sim" para confirmar ou "nao" para cancelar.`
+      `Quer cancelar "${choice.summary}" (${formatDateOnly(start, timeZone)}${timeStr ? ' ' + timeStr : ''})?\nResponda "sim" para confirmar o cancelamento ou "nao" para manter o agendamento.`
     );
     return true;
   }
@@ -627,7 +635,7 @@ async function handlePendingChooseAll(userId, client, message, chatId) {
   });
   await replyToMessage(
     userId, client, message,
-    `Quer cancelar TODOS os ${choices.length} eventos abaixo?\n${lines.join('\n')}\nResponda "sim" para confirmar ou "nao" para manter.`
+    `Quer cancelar TODOS os ${choices.length} eventos abaixo?\n${lines.join('\n')}\nResponda "sim" para confirmar o cancelamento ou "nao" para manter os agendamentos.`
   );
   return true;
 }
@@ -827,7 +835,7 @@ export async function processIncomingMessage(userId, client, message, source = '
           userId,
           client,
           message,
-          `Quer cancelar "${e.summary}" (${formatDateOnly(start, timeZone)} ${e.start?.dateTime ? formatTimeOnly(start, timeZone) : ''})?\nResponda "sim" para confirmar ou "nao" para cancelar.`
+          `Quer cancelar "${e.summary}" (${formatDateOnly(start, timeZone)} ${e.start?.dateTime ? formatTimeOnly(start, timeZone) : ''})?\nResponda "sim" para confirmar o cancelamento ou "nao" para manter o agendamento.`
         );
         return;
       }
