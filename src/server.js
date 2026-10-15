@@ -323,8 +323,11 @@ function getSessionSecret() {
   if (process.env.SESSION_SECRET) {
     return crypto.createHash('sha256').update('user-session:' + process.env.SESSION_SECRET).digest();
   }
-  // Fallback: deriva de um arquivo estavel auto-gerado em ./data
-  const file = path.resolve(process.env.DATA_DIR || './data', '.session-secret');
+  // Fallback: arquivo auto-gerado na pasta do banco. Precisa ser a pasta do
+  // volume: em ./data (= /app/data no container) ele sumia a cada deploy e
+  // derrubava o login de todo mundo no painel.
+  const dataDir = process.env.DATA_DIR || path.dirname(path.resolve(process.env.DB_PATH || './data/app.sqlite'));
+  const file = path.resolve(dataDir, '.session-secret');
   try {
     if (!fs.existsSync(file)) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
