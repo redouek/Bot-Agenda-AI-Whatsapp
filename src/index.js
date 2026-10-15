@@ -513,8 +513,6 @@ export async function logoutBot() {
 }
 
 async function startConfiguredInstances() {
-  await getOrCreateCurrentUser();
-
   if (!isPlatformConfigured()) {
     console.log('[index] Configuracao incompleta. Acesse o painel web para configurar.');
     return;

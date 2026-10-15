@@ -149,10 +149,9 @@ export async function initDatabase() {
     // Colunas ja existem
   }
 
-  await ensureUser({
-    id: DEFAULT_USER_ID,
-    name: DEFAULT_USER_NAME,
-  });
+  // Nao cria mais o usuario padrao (DEFAULT_USER_ID) aqui: e resto da era de
+  // um usuario so. Usuarios nascem do login com Google, e recria-lo a cada
+  // boot fazia ele reaparecer no admin toda vez que era excluido.
 
   return db;
 }
