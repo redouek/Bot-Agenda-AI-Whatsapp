@@ -142,7 +142,7 @@ TRANSCRIBE_SUMMARIZE=true
 TRANSCRIBE_SUMMARY_SECONDS=90
 TRANSCRIBE_SUMMARY_PROMPT=Resuma o áudio transcrito de forma concisa, em português do Brasil.
 GROQ_WHISPER_MODEL=whisper-large-v3-turbo
-GROQ_CHAT_MODEL=llama-3.3-70b-versatile
+GROQ_CHAT_MODEL=openai/gpt-oss-120b
 ```
 
 A comparação do gatilho ignora maiúsculas, acentos e pontuação.
