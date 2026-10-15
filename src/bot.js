@@ -49,7 +49,8 @@ function normalizeText(value = '') {
 
 function detectConfirmation(text = '') {
   const normalized = normalizeText(text);
-  // "sim N" ou "s N" ou "ok N" — N = numero da agenda escolhida (1..9)
+  // "sim N" ou "s N" ou "ok N" — N = numero da agenda escolhida (1..9). Formato
+  // antigo, ainda aceito; hoje o pedido e so o numero (ver processIncomingMessage).
   const withIndex = normalized.match(/^(sim|s|ok|confirmar|confirmo)\s+(\d+)$/);
   if (withIndex) return { decision: 'yes', calendarIndex: parseInt(withIndex[2], 10) };
   if (['sim', 's', 'confirmar', 'confirmo', 'ok', 'pode agendar', 'agendar'].includes(normalized)) return { decision: 'yes', calendarIndex: null };
@@ -163,14 +164,16 @@ function formatInviteNote(attendees) {
 async function formatPendingActionForConfirmation(pendingAction, userId) {
   const opts = userId ? await formatCalendarOptions(userId) : null;
   const tail = opts
-    ? `\n\nEm qual agenda?\n${opts.text}\n\nResponda "sim N" (ex: "sim 1") ou "nao" para cancelar.`
+    ? `\n\nEm qual agenda?\n${opts.text}\n\nResponda o numero da agenda para confirmar, ou "nao" para cancelar.`
     : `\nEsta correto? Responda "sim" para agendar ou "nao" para cancelar.`;
 
   if (pendingAction?.type === 'multiple_events') {
     const lines = ['Eventos para confirmar:'];
-    pendingAction.events.forEach((event, index) => {
+    // Marcador, nao numero: com varias agendas a resposta e um numero, e uma
+    // lista numerada de eventos confundiria com a de agendas.
+    pendingAction.events.forEach(event => {
       const timeZone = event.timeZone || getTimeZone();
-      lines.push(`${index + 1}. ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`);
+      lines.push(`• ${event.summary} - ${formatDateOnly(event.startDateTime, timeZone)} ${formatTimeOnly(event.startDateTime, timeZone)}`);
       if (event.attendees?.length) lines.push(`   Convidados (recebem o convite por e-mail): ${event.attendees.join(', ')}`);
     });
     return lines.join('\n') + tail;
@@ -179,7 +182,7 @@ async function formatPendingActionForConfirmation(pendingAction, userId) {
     return `${formatSingleEvent(pendingAction.event)}${tail}`;
   }
   return opts
-    ? `Em qual agenda?\n${opts.text}\n\nResponda "sim N" ou "nao" para cancelar.`
+    ? `Em qual agenda?\n${opts.text}\n\nResponda o numero da agenda para confirmar, ou "nao" para cancelar.`
     : 'Responda "sim" para confirmar ou "nao" para cancelar.';
 }
 
@@ -496,7 +499,7 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
         if (!calendarIndex) {
           // Pede pra escolher
           const opts = await formatCalendarOptions(userId);
-          await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda novamente com o numero da agenda desejada para TODOS os eventos:\n${opts.text}\n\nEx: "sim 1"`);
+          await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda so o numero da agenda para TODOS os eventos:\n${opts.text}`);
           return true;
         }
         targetCalendarId = calendarIds[calendarIndex - 1];
@@ -525,7 +528,7 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
     if (calendarIds.length > 1) {
       if (!calendarIndex) {
         const opts = await formatCalendarOptions(userId);
-        await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda novamente com o numero da agenda desejada:\n${opts.text}\n\nEx: "sim 1"`);
+        await replyToMessage(userId, client, message, `Voce tem ${calendarIds.length} agendas. Responda so o numero da agenda:\n${opts.text}`);
         return true;
       }
       targetCalendarId = calendarIds[calendarIndex - 1];
@@ -683,7 +686,18 @@ export async function processIncomingMessage(userId, client, message, source = '
 
   if (detectChooseAll(body) && await handlePendingChooseAll(userId, client, message, chatId)) return;
 
-  const confirmation = detectConfirmation(body);
+  // Com agendamento pendente, um numero sozinho e a escolha da agenda e ja
+  // confirma — "2" no lugar de "sim 2". Lista de escolha ('choice') ja foi
+  // tratada acima por handlePendingChoice. Com uma agenda so, o numero segue
+  // para o Gemini ("14" pode ser correcao de horario, nao um "sim").
+  let confirmation = detectConfirmation(body);
+  if (!confirmation && choiceIdx) {
+    const pendingNow = pendingActions.get(userScopedKey(userId, chatId));
+    const isScheduling = pendingNow?.type === 'single_event' || pendingNow?.type === 'multiple_events';
+    if (isScheduling && (await getCalendarIds(userId)).length > 1) {
+      confirmation = { decision: 'yes', calendarIndex: choiceIdx };
+    }
+  }
   if (confirmation && await handlePendingConfirmation(userId, client, message, chatId, confirmation)) return;
 
   const pendingKey = userScopedKey(userId, chatId);
