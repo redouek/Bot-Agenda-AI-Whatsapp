@@ -13,6 +13,7 @@ Bot pessoal de WhatsApp que agenda eventos no Google Calendar usando linguagem n
 - Lembretes automáticos X minutos antes
 - Consulta jogos de futebol e adiciona na agenda
 - Consulta Wikipedia
+- Transcreve áudios de qualquer conversa sob demanda (opcional, ver abaixo)
 
 ## Pré-requisitos
 
@@ -119,3 +120,29 @@ CONFIG_PATH=/data/config.json
 TOKENS_PATH=/data/google-tokens.json
 OAUTH_REDIRECT_URI=http://localhost:3000/oauth/callback
 ```
+
+## Transcrição de áudio (opcional)
+
+Na mesma sessão do WhatsApp, o bot transcreve áudios de **qualquer conversa que não seja o self-chat**. Nada é automático: você manda a frase-gatilho na conversa e ele responde citando o áudio com a transcrição (e um resumo, se o áudio for longo). Se o gatilho for uma resposta (reply) a um áudio, transcreve esse; senão, o mais recente da conversa. O self-chat continua exclusivo da agenda.
+
+Transcrição via [Groq](https://console.groq.com/keys) (Whisper, free tier). Para ligar, no `bot.env`:
+
+```env
+GROQ_API_KEY=...
+# E-mails dos usuarios do painel que terao a transcricao (separados por virgula, ou *)
+TRANSCRIBER_USERS=voce@gmail.com
+```
+
+Ajustes opcionais (com os defaults):
+
+```env
+TRANSCRIBE_TRIGGER=IA, transcreva o áudio por favor   # vale cadastrar como resposta rápida no WhatsApp
+TRANSCRIBE_LANGUAGE=pt
+TRANSCRIBE_SUMMARIZE=true
+TRANSCRIBE_SUMMARY_SECONDS=90
+TRANSCRIBE_SUMMARY_PROMPT=Resuma o áudio transcrito de forma concisa, em português do Brasil.
+GROQ_WHISPER_MODEL=whisper-large-v3-turbo
+GROQ_CHAT_MODEL=llama-3.3-70b-versatile
+```
+
+A comparação do gatilho ignora maiúsculas, acentos e pontuação.

@@ -3,6 +3,7 @@ import path from 'path';
 import pkg from 'whatsapp-web.js';
 import { loadConfig, isPlatformConfigured } from './config.js';
 import { startServer } from './server.js';
+import { registerTranscriber } from './transcriber.js';
 import { processIncomingMessage, startReminderLoop, stopReminderLoop, startSelfChatPolling, stopSelfChatPolling, hydrateSelfChatLidFromDb, setSessionStart, clearSessionStart } from './bot.js';
 import {
   deleteUser,
@@ -287,6 +288,10 @@ export async function startWhatsAppInstance(userId = getDefaultUserId()) {
       console.error(`[bot:${user.id}] Erro no fluxo de message_create:`, error);
     }
   });
+
+  // Transcricao de audio sob demanda nas conversas que NAO sao o self-chat.
+  // So liga para quem esta em TRANSCRIBER_USERS — ver transcriber.js.
+  registerTranscriber(user.id, client);
 
   try {
     await initializeWithWatchdog(client, runtime, INIT_TIMEOUT_MS);

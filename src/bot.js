@@ -24,6 +24,12 @@ export function getSelfChatHealth(userId) {
   return { polling: pollIntervals.has(userId), ...h };
 }
 
+// O self-chat pode aparecer com o id @lid do usuario em vez do @c.us — o
+// transcritor usa isto para nao atuar na conversa reservada da agenda.
+export function getSelfChatLid(userId) {
+  return selfChatLidByUser.get(userId) || null;
+}
+
 export function setSessionStart(userId, ts = Date.now()) {
   sessionStartTimes.set(userId, ts);
   console.log(`[bot:${userId}] sessao iniciada em ${new Date(ts).toISOString()} — mensagens anteriores serao ignoradas.`);

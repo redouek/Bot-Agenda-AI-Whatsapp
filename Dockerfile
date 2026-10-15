@@ -21,6 +21,7 @@ RUN apt-get update \
     ca-certificates \
     gnupg \
     chromium \
+    ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
