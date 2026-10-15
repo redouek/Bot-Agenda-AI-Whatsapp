@@ -20,7 +20,9 @@ import {
   getUser,
   isGoogleConnected,
   listUsers,
+  parseCalendarAliases,
   saveGoogleTokens,
+  setCalendarAliases,
   setUserAdmin,
   updateUserSettings,
   getWhatsAppSession,
@@ -838,6 +840,7 @@ async function handleRequest(req, res, manager) {
       if (!selectedCalendarIds.length && currentUser?.calendar_id) selectedCalendarIds = [currentUser.calendar_id];
       return json(res, {
         calendars: await listCalendars(uid),
+        calendarAliases: parseCalendarAliases(currentUser),
         selectedCalendarIds,
         // Compat: front antigo
         selectedCalendarId: selectedCalendarIds[0] || 'primary',
@@ -856,7 +859,12 @@ async function handleRequest(req, res, manager) {
     if (!calendarIds && body.GOOGLE_CALENDAR_ID) calendarIds = [body.GOOGLE_CALENDAR_ID];
     if (!Array.isArray(calendarIds) || !calendarIds.length) calendarIds = ['primary'];
     await updateUserSettings(uid, { calendarIds });
-    return json(res, { ok: true, calendarIds });
+    // Apelidos so chegam quando o painel os envia (front antigo nao manda).
+    let calendarAliases;
+    if (body.calendarAliases && typeof body.calendarAliases === 'object') {
+      calendarAliases = await setCalendarAliases(uid, body.calendarAliases);
+    }
+    return json(res, { ok: true, calendarIds, calendarAliases });
   }
 
   if (pathname === '/api/status') {

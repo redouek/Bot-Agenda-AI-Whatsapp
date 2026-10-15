@@ -576,7 +576,7 @@ async function loadGeminiModels() {
   }
 }
 
-function setCalendarOptions(calendars = [], selectedCalendarIds = []) {
+function setCalendarOptions(calendars = [], selectedCalendarIds = [], aliases = {}) {
   const container = $('calendar-checkboxes');
   if (!container) return;
   container.innerHTML = '';
@@ -593,22 +593,43 @@ function setCalendarOptions(calendars = [], selectedCalendarIds = []) {
     if (def) selected.add(def.id);
   }
 
+  const save = () => saveSelectedCalendars().catch(err => {
+    $('calendar-picker-status').textContent = 'Erro: ' + err.message;
+  });
+
   calendars.forEach(calendar => {
+    const row = document.createElement('div');
+    row.className = 'calendar-row';
     const label = document.createElement('label');
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.value = calendar.id;
     cb.checked = selected.has(calendar.id);
-    cb.addEventListener('change', () => {
-      saveSelectedCalendars().catch(err => {
-        $('calendar-picker-status').textContent = 'Erro: ' + err.message;
-      });
-    });
     const text = document.createElement('span');
     text.textContent = calendar.primary ? `${calendar.summary} (principal)` : calendar.summary;
     label.appendChild(cb);
     label.appendChild(text);
-    container.appendChild(label);
+
+    // Apelido: o nome curto que o bot mostra na enquete e na lista de
+    // agendas. So faz sentido para agenda selecionada.
+    const alias = document.createElement('input');
+    alias.type = 'text';
+    alias.className = 'calendar-alias';
+    alias.dataset.calendarId = calendar.id;
+    alias.maxLength = 30;
+    alias.placeholder = 'Apelido (ex: Pessoal)';
+    alias.value = aliases[calendar.id] || '';
+    alias.hidden = !cb.checked;
+    alias.addEventListener('change', save);
+
+    cb.addEventListener('change', () => {
+      alias.hidden = !cb.checked;
+      save();
+    });
+
+    row.appendChild(label);
+    row.appendChild(alias);
+    container.appendChild(row);
   });
 }
 
@@ -630,7 +651,7 @@ async function loadCalendars() {
     const selectedIds = data.selectedCalendarIds && data.selectedCalendarIds.length
       ? data.selectedCalendarIds
       : (data.selectedCalendarId ? [data.selectedCalendarId] : []);
-    setCalendarOptions(data.calendars, selectedIds);
+    setCalendarOptions(data.calendars, selectedIds, data.calendarAliases || {});
     calendarsLoaded = true;
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -645,10 +666,15 @@ async function saveSelectedCalendars() {
     $('calendar-picker-status').textContent = 'Selecione pelo menos uma agenda.';
     return;
   }
+  // Apelido de agenda desmarcada tambem fica salvo: remarcar nao perde o nome.
+  const calendarAliases = {};
+  container.querySelectorAll('input.calendar-alias').forEach(input => {
+    if (input.value.trim()) calendarAliases[input.dataset.calendarId] = input.value.trim();
+  });
   const res = await fetch(apiPath('/api/calendar/select'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ calendarIds: checked }),
+    body: JSON.stringify({ calendarIds: checked, calendarAliases }),
   });
   if (!res.ok) throw new Error('Não foi possível salvar.');
   const status = $('calendar-picker-status');

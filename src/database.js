@@ -126,6 +126,14 @@ export async function initDatabase() {
     // Coluna ja existe
   }
 
+  // Migration: apelido de cada agenda (JSON {calendarId: apelido}). Os nomes
+  // do Google (e-mails inteiros) quebravam linha nas opcoes da enquete.
+  try {
+    await db.exec('ALTER TABLE users ADD COLUMN calendar_aliases TEXT');
+  } catch {
+    // Coluna ja existe
+  }
+
   // Migration: prova de posse do telefone (modo contato). No self-chat a
   // prova era escanear o QR com o proprio numero; no modo contato qualquer um
   // poderia digitar o telefone de outra pessoa no painel. Quem ja tem LID do
@@ -290,6 +298,31 @@ export async function updateUserSettings(userId, settings = {}) {
   }
 
   return getUser(id);
+}
+
+export function parseCalendarAliases(user) {
+  try {
+    const parsed = JSON.parse(user?.calendar_aliases || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Substitui todos os apelidos. Vazio apaga; limite curto porque o apelido
+// existe para caber numa linha da enquete.
+export async function setCalendarAliases(userId, aliases = {}) {
+  const db = await getDb();
+  const clean = {};
+  for (const [id, value] of Object.entries(aliases || {})) {
+    const alias = String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
+    if (id && alias) clean[String(id)] = alias;
+  }
+  await db.run(
+    'UPDATE users SET calendar_aliases = ?, updated_at = ? WHERE id = ?',
+    Object.keys(clean).length ? JSON.stringify(clean) : null, nowIso(), normalizeUserId(userId)
+  );
+  return clean;
 }
 
 function newVerifyCode() {

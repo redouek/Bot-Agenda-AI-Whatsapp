@@ -720,6 +720,21 @@ input:focus, select:focus {
   color: var(--muted);
   font-weight: 400;
 }
+.calendar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.calendar-row label { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.calendar-checkboxes input.calendar-alias {
+  flex: 0 1 180px;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 8px;
+  font-size: 13px;
+}
 .calendar-picker-actions { margin: 6px 0; }
 
 .users-table .row-actions { white-space: nowrap; }

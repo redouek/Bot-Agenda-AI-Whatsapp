@@ -6,7 +6,7 @@ import { installMsgKeyShim } from './compat.js';
 import pkg from 'whatsapp-web.js';
 
 const { Poll } = pkg;
-import { getUser, updateUserSettings } from './database.js';
+import { getUser, parseCalendarAliases, updateUserSettings } from './database.js';
 
 const pendingActions = new Map();
 const processedMessageIds = new Set();
@@ -99,15 +99,19 @@ function shortCalendarLabel(id) {
   return id; // ex: e-mail pessoal
 }
 
+// Nome mostrado de cada agenda: o apelido do painel, senao o nome do Google.
+// Lido a cada uso (sem o cache dos nomes) para o apelido valer na hora.
 async function formatCalendarOptions(userId) {
   const ids = await getCalendarIds(userId);
   if (ids.length <= 1) return null;
+  const aliases = parseCalendarAliases(await getUser(userId));
   let names = await getCalendarNameMap(userId);
-  if (ids.some(id => !names.get(id))) {
+  if (ids.some(id => !aliases[id] && !names.get(id))) {
     names = await getCalendarNameMap(userId, true);
   }
-  const lines = ids.map((id, i) => `${i + 1}. ${names.get(id) || shortCalendarLabel(id)}`);
-  return { ids, text: lines.join('\n') };
+  const labels = ids.map(id => aliases[id] || names.get(id) || shortCalendarLabel(id));
+  const lines = labels.map((label, i) => `${i + 1}. ${label}`);
+  return { ids, labels, text: lines.join('\n') };
 }
 
 // ---------- Enquete de agenda (modo contato) ----------
@@ -128,10 +132,9 @@ async function buildConfirmationPoll(userId) {
   if (!opts) {
     return { title: 'Confirmar o agendamento?', yes: ['Sim. Agendar'], no: 'Não. Cancelar' };
   }
-  const names = await getCalendarNameMap(userId);
   // Opcoes repetidas confundiriam o voto; o numero na frente garante unicas
   // e deixa claro que responder o numero digitando tambem vale.
-  const yes = opts.ids.map((id, i) => `${i + 1}. ${names.get(id) || shortCalendarLabel(id)}`);
+  const yes = opts.labels.map((label, i) => `${i + 1}. ${label}`);
   return { title: 'Confirma? Em qual agenda?', yes, no: 'Cancelar' };
 }
 
