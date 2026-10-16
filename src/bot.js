@@ -401,29 +401,84 @@ function formatEventsList(events, timeZone) {
   }).join('\n\n');
 }
 
+// O container roda em UTC: setHours/new Date('YYYY-MM-DD') caem 3h antes do dia
+// de Sao Paulo. Em 15/10/2026 "agenda do dia 19" voltou vazia (intervalo de
+// duracao zero) e "semana que vem" veio deslocada. Toda conta de dia e feita
+// aqui, em dias-calendario do fuso do usuario.
+function localYmd(date, timeZone) {
+  const [y, m, d] = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(date).split('-').map(Number);
+  return { y, m, d };
+}
+
+function addDaysYmd({ y, m, d }, days) {
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
+}
+
+function weekdayOfYmd({ y, m, d }) {
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = domingo
+}
+
+// Instante UTC da meia-noite local do dia informado.
+function zonedDayStart({ y, m, d }, timeZone) {
+  const guess = Date.UTC(y, m - 1, d);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(guess)).map(p => [p.type, p.value]));
+  const asLocal = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  return new Date(guess - (asLocal - guess));
+}
+
+// [inicio do primeiro dia, fim do ultimo dia] em dias locais.
+function zonedDaysRange(firstYmd, lastYmd, timeZone) {
+  const start = zonedDayStart(firstYmd, timeZone);
+  const end = new Date(zonedDayStart(addDaysYmd(lastYmd, 1), timeZone).getTime() - 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+function parseYmd(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ''));
+  return match ? { y: +match[1], m: +match[2], d: +match[3] } : null;
+}
+
 function getPeriodRange(period, startDate, endDate) {
+  const timeZone = getTimeZone();
   const now = new Date();
-  if (period === 'today') {
-    const start = new Date(now); start.setSeconds(0, 0);
-    const end = new Date(now); end.setHours(23, 59, 59, 999);
-    return { start: start.toISOString(), end: end.toISOString() };
-  }
+  const today = localYmd(now, timeZone);
+  const fromNow = (lastYmd) => ({
+    start: now.toISOString(),
+    end: zonedDaysRange(today, lastYmd, timeZone).end,
+  });
+
+  if (period === 'today') return fromNow(today);
   if (period === 'tomorrow') {
-    const start = new Date(now); start.setDate(start.getDate() + 1); start.setHours(0, 0, 0, 0);
-    const end = new Date(start); end.setHours(23, 59, 59, 999);
-    return { start: start.toISOString(), end: end.toISOString() };
+    const tomorrow = addDaysYmd(today, 1);
+    return zonedDaysRange(tomorrow, tomorrow, timeZone);
   }
-  if (period === 'this_week') {
-    const start = new Date(now); start.setSeconds(0, 0);
-    const end = new Date(now); end.setDate(end.getDate() + 7); end.setHours(23, 59, 59, 999);
-    return { start: start.toISOString(), end: end.toISOString() };
+  if (period === 'this_week') return fromNow(addDaysYmd(today, 7));
+  if (period === 'next_week') {
+    // Semana brasileira: domingo a sabado. "Semana que vem" = o proximo domingo
+    // (estritamente depois de hoje) ate o sabado seguinte.
+    const sunday = addDaysYmd(today, 7 - weekdayOfYmd(today));
+    return zonedDaysRange(sunday, addDaysYmd(sunday, 6), timeZone);
   }
   if (period === 'date_range' && startDate && endDate) {
-    return { start: new Date(startDate).toISOString(), end: new Date(endDate).toISOString() };
+    // Data pura ("2026-10-19") vale o dia local inteiro; com horario, respeita o instante.
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+    const start = dateOnly.test(startDate) ? zonedDayStart(parseYmd(startDate), timeZone) : new Date(startDate);
+    const end = dateOnly.test(endDate)
+      ? new Date(zonedDayStart(addDaysYmd(parseYmd(endDate), 1), timeZone).getTime() - 1)
+      : new Date(endDate);
+    // Fim igual ou anterior ao inicio (ex: "2026-10-19T00:00" nos dois) -> estende ate o fim do dia.
+    if (end <= start) {
+      const lastDay = parseYmd(endDate) || localYmd(start, timeZone);
+      return { start: start.toISOString(), end: zonedDaysRange(lastDay, lastDay, timeZone).end };
+    }
+    return { start: start.toISOString(), end: end.toISOString() };
   }
-  const start = new Date(now); start.setSeconds(0, 0);
-  const end = new Date(now); end.setHours(23, 59, 59, 999);
-  return { start: start.toISOString(), end: end.toISOString() };
+  return fromNow(today);
 }
 
 // A mesma mensagem chega com o id serializado de formas diferentes conforme a
