@@ -202,10 +202,14 @@ export function friendlyAiError(error) {
   const status = error?.status || error?.response?.status;
   const msg = error?.message || error?.response?.data?.error?.message || '';
 
+  // Desde 18/09/2026 o Gemini devolve 402 para credito pre-pago esgotado;
+  // antes vinha como 429, entao o texto ainda e checado no 429.
+  const noCredit = status === 402
+    || (status === 429 && /prepayment credits are depleted|billing|quota.*exhausted|out of credits/i.test(msg));
+  if (noCredit) {
+    return 'O assistente esta sem credito na API de IA. Avise o administrador para recarregar a conta.';
+  }
   if (status === 429) {
-    if (/prepayment credits are depleted|billing|quota.*exhausted|out of credits/i.test(msg)) {
-      return 'O assistente esta sem credito na API de IA. Avise o administrador para recarregar a conta.';
-    }
     return 'Muitas mensagens em sequencia. Espere uns segundos e tente de novo.';
   }
   if (status === 401 || status === 403) {
