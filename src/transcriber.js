@@ -10,17 +10,11 @@
 // Liga por usuario via TRANSCRIBER_USERS (e-mails separados por virgula, ou *)
 // e exige GROQ_API_KEY.
 
-import { spawn } from 'child_process';
 import { downloadMediaCompat, fixMsgId, installMsgKeyShim, msgId } from './compat.js';
 import { getSelfChatLid } from './bot.js';
-
-const GROQ_BASE = 'https://api.groq.com/openai/v1';
+import { groqChat, hasGroqKey, toGroqAudio, transcribeAudio } from './groq.js';
 
 const cfg = {
-  apiKey: () => process.env.GROQ_API_KEY || '',
-  whisperModel: () => process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo',
-  chatModel: () => process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-120b',
-  language: () => process.env.TRANSCRIBE_LANGUAGE || 'pt',
   summarize: () => !/^(false|0|no)$/i.test(process.env.TRANSCRIBE_SUMMARIZE || ''),
   summaryThresholdSeconds: () => {
     const n = parseInt(process.env.TRANSCRIBE_SUMMARY_SECONDS || '', 10);
@@ -34,7 +28,7 @@ const cfg = {
 };
 
 export function isTranscriberEnabled(userId) {
-  if (!cfg.apiKey()) return false;
+  if (!hasGroqKey()) return false;
   const list = String(process.env.TRANSCRIBER_USERS || '')
     .split(',')
     .map(s => s.trim().toLowerCase())
@@ -66,106 +60,13 @@ function audioSeconds(msg) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// ── Groq (API compativel com OpenAI) ────────────────────────────────────────
-
-async function groqError(res) {
-  const text = await res.text().catch(() => '');
-  return new Error(`Groq HTTP ${res.status}: ${text.slice(0, 300)}`);
-}
-
-async function transcribeAudio(data, filename, mimeType) {
-  const form = new FormData();
-  form.append('file', new Blob([data], { type: mimeType }), filename);
-  form.append('model', cfg.whisperModel());
-  form.append('language', cfg.language());
-  const res = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cfg.apiKey()}` },
-    body: form,
-  });
-  if (!res.ok) throw await groqError(res);
-  const json = await res.json();
-  return String(json.text || '').trim();
-}
+// ── Groq ────────────────────────────────────────────────────────────────────
 
 async function summarizeText(text) {
-  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cfg.apiKey()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: cfg.chatModel(),
-      temperature: 0.3,
-      messages: [
-        { role: 'system', content: cfg.summaryPrompt() },
-        { role: 'user', content: `Resuma este áudio transcrito:\n\n${text}` },
-      ],
-    }),
-  });
-  if (!res.ok) throw await groqError(res);
-  const json = await res.json();
-  return String(json.choices?.[0]?.message?.content || '').trim();
-}
-
-// ── Formato do audio ────────────────────────────────────────────────────────
-// A Groq so aceita [flac mp3 mp4 mpeg mpga m4a ogg opus wav webm] e confere a
-// extensao do nome do arquivo. Mensagem de voz vem em ogg/opus; "arquivo de
-// audio" pode vir como audio/aac em ADTS cru, que a Groq recusa — esse e
-// convertido para ogg/opus.
-const ACCEPTED = {
-  'audio/ogg': 'ogg',
-  'audio/opus': 'opus',
-  'audio/mpeg': 'mp3',
-  'audio/mp3': 'mp3',
-  'audio/mp4': 'm4a',
-  'audio/m4a': 'm4a',
-  'audio/x-m4a': 'm4a',
-  'audio/wav': 'wav',
-  'audio/x-wav': 'wav',
-  'audio/wave': 'wav',
-  'audio/webm': 'webm',
-  'audio/flac': 'flac',
-  'audio/x-flac': 'flac',
-};
-
-// Demuxer do ffmpeg FIXO: o arquivo vem de terceiros, e deixar o ffmpeg
-// autodetectar abriria a porta para um "audio" que e playlist HLS/concat e faz
-// o servidor buscar URLs (SSRF). Por isso tambem `-protocol_whitelist pipe`.
-const CONVERT = {
-  'audio/aac': 'aac',
-  'audio/x-aac': 'aac',
-  'audio/amr': 'amr',
-};
-
-async function toGroqAudio(data, mimetype) {
-  const base = String(mimetype || '').split(';')[0].trim().toLowerCase();
-  const ext = ACCEPTED[base];
-  if (ext) return { data, filename: `audio.${ext}`, mimeType: base };
-  const demuxer = CONVERT[base];
-  if (!demuxer) throw new Error(`formato de audio nao suportado: ${mimetype}`);
-  return { data: await ffmpegToOpus(data, demuxer), filename: 'audio.ogg', mimeType: 'audio/ogg' };
-}
-
-function ffmpegToOpus(input, demuxer) {
-  return new Promise((resolve, reject) => {
-    const ff = spawn('ffmpeg', [
-      '-hide_banner', '-loglevel', 'error',
-      '-protocol_whitelist', 'pipe',
-      '-f', demuxer,
-      '-i', 'pipe:0',
-      '-vn', '-ac', '1', '-c:a', 'libopus', '-b:a', '32k',
-      '-f', 'ogg', 'pipe:1',
-    ]);
-    const out = [];
-    let err = '';
-    ff.stdout.on('data', c => out.push(c));
-    ff.stderr.on('data', c => { err += c.toString(); });
-    ff.on('error', reject);
-    ff.on('close', code =>
-      code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`ffmpeg saiu com ${code}: ${err.trim()}`)));
-    // EPIPE se o ffmpeg morrer antes de ler tudo — o erro real vem no "close".
-    ff.stdin.on('error', () => {});
-    ff.stdin.end(input);
-  });
+  return groqChat([
+    { role: 'system', content: cfg.summaryPrompt() },
+    { role: 'user', content: `Resuma este áudio transcrito:\n\n${text}` },
+  ]);
 }
 
 // ── Fluxo do gatilho ────────────────────────────────────────────────────────

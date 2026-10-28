@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getConfig } from './config.js';
 import { downloadMediaCompat } from './compat.js';
+import { groqChat, hasGroqKey, toGroqAudio, transcribeAudio } from './groq.js';
 
 let _aiClient = null;
 let _model = null;
@@ -191,10 +192,37 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
   ].join('\n');
 }
 
+// A Groq e a reserva para quando o Gemini falha (credito, 503 de "alta demanda"
+// no tier gratuito, chave invalida). Ela nao le imagem; audio vira texto pelo
+// Whisper antes de entrar no prompt.
+async function generateWithGroq([prompt, media]) {
+  let text = prompt;
+  if (media) {
+    const mimeType = media.inlineData?.mimeType || '';
+    if (!mimeType.startsWith('audio/')) throw new Error(`reserva nao le ${mimeType || 'midia'}`);
+    const audio = await toGroqAudio(Buffer.from(media.inlineData.data, 'base64'), mimeType);
+    const transcript = await transcribeAudio(audio.data, audio.filename, audio.mimeType);
+    text += `\nTranscricao do audio: ${transcript || '(vazia)'}`;
+  }
+  return groqChat([{ role: 'user', content: text }], { json: true });
+}
+
 async function generateJson(parts) {
-  const model = getModel();
-  const result = await model.generateContent(parts);
-  const raw = result?.response?.text?.() || '';
+  let raw;
+  try {
+    const result = await getModel().generateContent(parts);
+    raw = result?.response?.text?.() || '';
+  } catch (error) {
+    if (!hasGroqKey()) throw error;
+    console.warn('[gemini] Falhou, usando a Groq de reserva:', error?.status, error?.message?.slice(0, 160));
+    try {
+      raw = await generateWithGroq(parts);
+    } catch (groqError) {
+      console.error('[groq] A reserva tambem falhou:', groqError?.message);
+      // O erro do Gemini e o que explica a pane do principal (ver friendlyAiError).
+      throw error;
+    }
+  }
   return extractJsonObject(raw) || { kind: 'none', reply: '', requiresConfirmation: false };
 }
 
