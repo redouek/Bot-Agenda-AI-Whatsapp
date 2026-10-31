@@ -83,6 +83,7 @@
             <li><code>.../auth/calendar.events</code> — criar, ler, atualizar e deletar eventos nas suas agendas.</li>
             <li><code>.../auth/calendar.readonly</code> — listar suas agendas para que voce escolha em qual criar cada evento.</li>
             <li><code>.../auth/userinfo.email</code> — saber o e-mail da sua conta para identifica-lo no sistema.</li>
+            <li><code>.../auth/tasks</code> (opcional) — pedido apenas se voce usar tarefas: criar, listar e concluir itens na sua lista padrao do Google Tasks.</li>
           </ul>
         </details>
       </section>
@@ -95,7 +96,8 @@
         <details class="helper" open>
           <summary>Para quem enviamos</summary>
           <ul>
-            <li><strong>Google (Calendar e OAuth):</strong> para executar as acoes na sua agenda.</li>
+            <li><strong>Google (Calendar, Tasks e OAuth):</strong> para executar as acoes na sua agenda e nas suas tarefas.</li>
+            <li><strong>Open-Meteo e BrasilAPI:</strong> recebem apenas a cidade, CEP, CNPJ ou DDD que voce consultar (e a cidade do local do evento, para a previsao do tempo). Nenhum dado de conta e enviado.</li>
             <li><strong>Google Gemini (IA generativa):</strong> recebe o texto das suas mensagens recentes (ultimas 6) para interpretar a intencao. Sujeito aos termos do Google AI.</li>
             <li><strong>Meta/WhatsApp:</strong> a sessao do WhatsApp Web e mantida via servidores oficiais do WhatsApp.</li>
             <li><strong>APIs externas (apenas quando voce solicita):</strong> Football Data, Open-Meteo, Wikipedia. Enviamos apenas a query especifica (ex: nome do time, nome da cidade).</li>

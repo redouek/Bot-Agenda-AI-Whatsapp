@@ -42,6 +42,22 @@ export function getLoginAuthUrl(state) {
   });
 }
 
+export const TASKS_SCOPE = 'https://www.googleapis.com/auth/tasks';
+
+// Permissao incremental: so quem usa tarefas autoriza o Google Tasks. O
+// include_granted_scopes mantem o Calendar no mesmo token. O callback e o mesmo
+// do reconnect (state = userId).
+export function getTasksAuthUrl(userId) {
+  const oauth2Client = getOAuthClient();
+  return oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    include_granted_scopes: true,
+    scope: [TASKS_SCOPE],
+    state: userId,
+  });
+}
+
 // Url legacy mantida para reconnect manual do Calendar (continua funcionando).
 export function getAuthUrl(userId) {
   const oauth2Client = getOAuthClient();
@@ -90,9 +106,9 @@ export async function exchangeCodeForTokens(code, userId) {
   return tokens;
 }
 
-async function getCalendarClient(userId) {
-  if (cachedCalendarClients.has(userId)) return cachedCalendarClients.get(userId);
-
+// Cliente OAuth com os tokens do usuario; tokens renovados sao persistidos.
+// Usado pelo Calendar e pelo Google Tasks (tasks.js).
+export async function getUserAuthClient(userId) {
   const tokens = await getGoogleTokens(userId);
   if (!tokens?.refresh_token) {
     throw new Error('Google Calendar nao conectado. Acesse o painel de setup e clique em "Conectar Google".');
@@ -110,6 +126,13 @@ async function getCalendarClient(userId) {
     }
   });
 
+  return oauth2Client;
+}
+
+async function getCalendarClient(userId) {
+  if (cachedCalendarClients.has(userId)) return cachedCalendarClients.get(userId);
+
+  const oauth2Client = await getUserAuthClient(userId);
   const client = google.calendar({ version: 'v3', auth: oauth2Client });
   cachedCalendarClients.set(userId, client);
   return client;

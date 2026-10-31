@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import qrcode from 'qrcode';
 import { getConfig, setConfig, isPlatformConfigured, isContactMode } from './config.js';
-import { getAuthUrl, getLoginAuthUrl, exchangeCodeForLogin, exchangeCodeForTokens, listCalendars } from './calendar.js';
+import { getAuthUrl, getLoginAuthUrl, getTasksAuthUrl, exchangeCodeForLogin, exchangeCodeForTokens, listCalendars } from './calendar.js';
 import { getSelfChatHealth } from './bot.js';
 import { isTranscriberEnabled } from './transcriber.js';
 import {
@@ -986,6 +986,24 @@ async function handleRequest(req, res, manager) {
     try {
       const authUrl = getAuthUrl(uid);
       res.writeHead(302, { Location: authUrl });
+      res.end();
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<h2>Erro</h2><p>${err.message}</p><a href="/">Voltar</a>`);
+    }
+    return;
+  }
+
+  // ---------- Permissao incremental do Google Tasks (link enviado pelo bot) ----------
+  if (pathname === '/oauth/tasks') {
+    const uid = getRequestUserId(req);
+    if (!uid) {
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<h2>Entre no painel primeiro</h2><p>Depois de entrar, abra este link de novo.</p><a href="/">Entrar</a>');
+      return;
+    }
+    try {
+      res.writeHead(302, { Location: getTasksAuthUrl(uid) });
       res.end();
     } catch (err) {
       res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });

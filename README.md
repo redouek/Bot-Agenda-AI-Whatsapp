@@ -13,6 +13,10 @@ Bot pessoal de WhatsApp que agenda eventos no Google Calendar usando linguagem n
 - Lembretes automáticos X minutos antes
 - Consulta jogos de futebol e adiciona na agenda
 - Consulta Wikipedia
+- Clima e previsão do tempo (Open-Meteo), com aviso de chuva e feriado ao propor um evento
+- Feriados nacionais, CEP, CNPJ e DDD (BrasilAPI)
+- Tarefas no Google Tasks ("anota comprar pão", "quais minhas tarefas?")
+- Controle da casa pelo Home Assistant, só para o dono (opcional, ver abaixo)
 - Transcreve áudios de qualquer conversa sob demanda (opcional, ver abaixo)
 
 ## Pré-requisitos
@@ -105,6 +109,7 @@ Os dados ficam num volume Docker chamado `bot_data`. A sessão do WhatsApp e as 
 | Gemini API | Gratuito (tier free generoso) |
 | Google Calendar API | Gratuito |
 | Football-data.org | Gratuito (tier free) |
+| Open-Meteo, BrasilAPI, Google Tasks | Gratuitos (Open-Meteo: uso não comercial) |
 | Infraestrutura | Seu próprio computador ou ~$5/mês em VPS |
 
 > **Aviso:** o `whatsapp-web.js` funciona simulando o WhatsApp Web e tecnicamente viola os ToS do WhatsApp. O risco de ban é baixo para uso pessoal, mas existe.
@@ -120,6 +125,30 @@ CONFIG_PATH=/data/config.json
 TOKENS_PATH=/data/google-tokens.json
 OAUTH_REDIRECT_URI=http://localhost:3000/oauth/callback
 ```
+
+## Assistente pessoal: clima, tarefas e casa
+
+**Clima e utilidades** não precisam de chave. Para responder "vai chover amanhã?" sem citar a cidade, defina no `bot.env`:
+
+```env
+DEFAULT_CITY=Campinas
+```
+
+**Google Tasks** usa o mesmo login Google do Calendar. Na primeira vez que alguém pede uma tarefa, o bot manda o link `/oauth/tasks` para autorizar o acesso às tarefas. Antes, ative a **Google Tasks API** no mesmo projeto do Google Cloud (APIs & Services → Library) e, se a tela de consentimento estiver em verificação, inclua o escopo `.../auth/tasks`.
+
+**Home Assistant** (opcional): controla a casa de **uma pessoa só**, o dono. Crie um token em *Perfil → Segurança → Tokens de acesso de longa duração* no Home Assistant e adicione ao `bot.env`:
+
+```env
+HA_URL=https://ha.seudominio.com      # endereco que o container do bot alcanca (ex: o tunel da Cloudflare)
+HA_TOKEN=...
+# Quem pode controlar a casa (e-mails do painel). Sem a variavel: so os admins.
+HA_ALLOWED_EMAILS=voce@gmail.com
+# Opcional: dominios liberados. Padrao: luzes, switches, ventiladores, cortinas, ar, midia,
+# cenas, scripts, aspirador e sensores. Fechaduras e alarmes ficam bloqueados por padrao.
+HA_ALLOWED_DOMAINS=
+```
+
+Se o Home Assistant estiver atrás do Cloudflare Access, libere o caminho `/api/` para o bot (por exemplo, com um *service token* ou uma regra de bypass), senão as chamadas recebem a página de login.
 
 ## Transcrição de áudio (opcional)
 

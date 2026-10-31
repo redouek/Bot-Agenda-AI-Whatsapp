@@ -178,12 +178,15 @@ function buildPrompt({ history, pendingAction, userText, mediaKind }) {
     'CANCELAMENTO FOLLOW-UP: se o usuario JA cancelou um evento e na sequencia diz "e o de X tambem", "o outro tambem", "o mesmo", "e o de quarta", "e o de amanha", IDENTIFIQUE pelo historico recente o titulo do evento que acabou de ser cancelado (mensagem do bot tipo "Evento X cancelado com sucesso") e produza cancel_event com query=titulo + period adequado ("tomorrow", "this_week", ou date_range com a data implicita). NUNCA pergunte "qual evento?" — herde o titulo do contexto anterior.',
     'Se a mensagem pedir informacao atual sobre futebol, jogos, amistosos, tabela ou proximo jogo, produza lookup com source football. O campo query deve conter APENAS o nome do CLUBE/SELECAO (nunca da cidade!). Para times com nome de cidade (Sao Paulo, Barcelona, Madrid), envie o nome do CLUBE como "Sao Paulo FC", "FC Barcelona", "Real Madrid" — adicionando o sufixo do clube quando ambiguo. Exemplos: pergunta "jogos do sao paulo" -> query="Sao Paulo FC"; "jogos do flamengo" -> query="Flamengo"; "jogos do real madrid" -> query="Real Madrid"; "jogos do barcelona" -> query="FC Barcelona". Nunca envie a pergunta completa.',
     'APELIDOS E SIGLAS de clubes: resolva siglas e apelidos populares para o nome canonico antes de montar o query. Brasil: SPFC/Tricolor Paulista/Sao Paulino -> "Sao Paulo FC"; FLA/Mengao/Mengo/Rubro-Negro -> "Flamengo"; COR/Timao/Corinthia -> "Corinthians"; PAL/Verdao/Porco -> "Palmeiras"; SAN/Peixe -> "Santos"; VAS/Vascao/Gigante da Colina -> "Vasco da Gama"; FLU/Flu/Tricolor Carioca -> "Fluminense"; BOT/Fogao/Glorioso -> "Botafogo"; CRU/Cabuloso/Raposa -> "Cruzeiro"; Galo/Atletico-MG/CAM -> "Atletico Mineiro"; GRE/Tricolor Gaucho/Imortal -> "Gremio"; INT/Colorado/Inter -> "Internacional"; BAH/Esquadrao -> "Bahia"; Coxa/CFC -> "Coritiba". Europa: RM/Real/Merengues -> "Real Madrid"; Barca/FCB/Blaugrana -> "FC Barcelona"; MU/Man United/Red Devils -> "Manchester United"; City -> "Manchester City"; PSG -> "Paris Saint-Germain"; Juve/Bianconeri -> "Juventus"; Bayern -> "Bayern Munich"; Atleti -> "Atletico Madrid". Selecoes: Selecao/Canarinho/Verde-Amarela -> "Brazil".',
-    'CLIMA: qualquer mensagem que pergunte sobre clima, tempo, previsao do tempo, temperatura, chuva, sol, vento DEVE virar lookup com source="weather". O campo query deve conter APENAS o nome da cidade (sem acentos extras — pode ter, mas tudo bem). Use period ("today", "tomorrow", "this_week") quando o usuario especificar. Exemplos: "como esta o tempo em SP" -> { kind:"lookup", lookup: { source:"weather", query:"São Paulo" }}; "vai chover amanha no Rio?" -> { kind:"lookup", lookup: { source:"weather", query:"Rio de Janeiro", period:"tomorrow" }}; "previsao da semana" SEM cidade -> kind:"chat" com reply pedindo qual cidade.',
+    'CLIMA: qualquer mensagem que pergunte sobre clima, tempo, previsao do tempo, temperatura, chuva, sol, vento DEVE virar lookup com source="weather". O campo query deve conter APENAS o nome da cidade (sem acentos extras — pode ter, mas tudo bem). Use period ("today", "tomorrow", "this_week") quando o usuario especificar. Exemplos: "como esta o tempo em SP" -> { kind:"lookup", lookup: { source:"weather", query:"São Paulo" }}; "vai chover amanha no Rio?" -> { kind:"lookup", lookup: { source:"weather", query:"Rio de Janeiro", period:"tomorrow" }}; "previsao da semana" SEM cidade -> { kind:"lookup", lookup: { source:"weather", query:"", period:"this_week" }} (o sistema usa a cidade padrao ou pergunta qual).',
+    'FERIADOS: perguntas sobre feriados ou "proximo feriado" -> lookup com source="holidays"; query = ano mencionado (ex: "2027") ou "proximo" quando perguntar pelo proximo. UTILIDADES: consultar CEP -> lookup source="cep" com query=o CEP; dados de empresa por CNPJ -> source="cnpj" com query=o CNPJ; cidades de um DDD -> source="ddd" com query=o DDD.',
+    'TAREFAS (Google Tasks): pedidos para anotar algo a fazer SEM horario marcado, lista de afazeres/compras, ver tarefas pendentes ou marcar tarefa como feita -> kind="task". action="add" (title curto; varios itens -> items com um titulo por item; due=YYYY-MM-DD se houver prazo), "list" ou "complete" (query=nome da tarefa). Ex: "anota comprar pao e leite" -> {kind:"task", task:{action:"add", items:["Comprar pao","Comprar leite"]}}; "quais minhas tarefas?" -> {kind:"task", task:{action:"list"}}; "terminei de pagar o IPVA" -> {kind:"task", task:{action:"complete", query:"IPVA"}}. Compromisso COM horario continua sendo schedule_proposal.',
+    'CASA (Home Assistant): pedidos para ligar, desligar, acender, apagar, abrir, fechar, ajustar ar-condicionado, brilho ou volume, ou perguntas sobre o estado de dispositivos/sensores da casa -> kind="home". action="turn_on", "turn_off", "toggle", "set_value" (value numerico: temperatura em C, brilho %, posicao %, volume %), "status" ou "list". target=dispositivo e comodo como o usuario disse (ex: "luz da sala", "ar do quarto"). all=true quando disser "todas"/"todos". Ex: "apaga todas as luzes" -> {kind:"home", home:{action:"turn_off", target:"luzes", all:true}}; "liga o ar do quarto em 23" -> {kind:"home", home:{action:"set_value", target:"ar do quarto", value:23}}.',
     'Se a mensagem pedir fato geral, historico ou enciclopedico, produza lookup com source wiki.',
     'Se a mensagem for apenas conversa, produza chat.',
     'Responda apenas JSON valido, sem markdown.',
     'Formato:',
-    '{"kind":"chat|schedule_proposal|multiple_events|list_events|cancel_event|lookup|none","reply":"texto opcional","requiresConfirmation":true|false,"replacePreviousQuery":"titulo do evento antigo a cancelar (opcional, so para correcoes)","event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":"","recurrence":[],"attendees":["email@dominio.com"]},"events":[{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","timeZone":"","attendees":[]}],"list_events":{"period":"today|tomorrow|this_week|next_week|date_range","startDate":"","endDate":""},"cancel_event":{"query":"palavras-chave do nome","period":"today|tomorrow|this_week|next_week|date_range","startDate":"","endDate":""},"lookup":{"source":"football|wiki|weather","query":"consulta objetiva","intent":"fixtures|general","period":"today|tomorrow|this_week"}}',
+    '{"kind":"chat|schedule_proposal|multiple_events|list_events|cancel_event|lookup|task|home|none","reply":"texto opcional","requiresConfirmation":true|false,"replacePreviousQuery":"titulo do evento antigo a cancelar (opcional, so para correcoes)","event":{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","locationSuggestion":"","timeZone":"","recurrence":[],"attendees":["email@dominio.com"]},"events":[{"summary":"","description":"","startDateTime":"","endDateTime":"","location":"","timeZone":"","attendees":[]}],"list_events":{"period":"today|tomorrow|this_week|next_week|date_range","startDate":"","endDate":""},"cancel_event":{"query":"palavras-chave do nome","period":"today|tomorrow|this_week|next_week|date_range","startDate":"","endDate":""},"lookup":{"source":"football|wiki|weather|holidays|cep|cnpj|ddd","query":"consulta objetiva","intent":"fixtures|general","period":"today|tomorrow|this_week"},"task":{"action":"add|list|complete","title":"","items":[],"due":"","notes":"","query":""},"home":{"action":"turn_on|turn_off|toggle|set_value|status|list","target":"","value":null,"all":false}}',
     `Data/hora atual: ${todayLocal}`,
     `Historico recente:\n${historyText}`,
     `Confirmacao pendente: ${pendingText}`,
@@ -341,17 +344,28 @@ export async function planConversationTurn({ message, type, text, history = [], 
     };
   }
 
-  if (parsed.kind === 'lookup' && parsed.lookup?.source && parsed.lookup?.query) {
+  // Clima e feriados podem vir sem query (cidade padrao / ano atual)
+  const queryOptional = ['weather', 'holidays'].includes(parsed.lookup?.source);
+  if (parsed.kind === 'lookup' && parsed.lookup?.source && (parsed.lookup?.query || queryOptional)) {
     return {
       kind: 'lookup',
       reply: parsed.reply || '',
       requiresConfirmation: false,
       lookup: {
         source: parsed.lookup.source,
-        query: parsed.lookup.query,
+        query: parsed.lookup.query || '',
         intent: parsed.lookup.intent || 'general',
+        period: parsed.lookup.period || '',
       },
     };
+  }
+
+  if (parsed.kind === 'task' && parsed.task?.action) {
+    return { kind: 'task', reply: parsed.reply || '', requiresConfirmation: false, task: parsed.task };
+  }
+
+  if (parsed.kind === 'home' && parsed.home?.action) {
+    return { kind: 'home', reply: parsed.reply || '', requiresConfirmation: false, home: parsed.home };
   }
 
   if (parsed.kind === 'chat') {

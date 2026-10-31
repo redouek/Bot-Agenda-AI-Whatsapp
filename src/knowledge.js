@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { getConfig } from './config.js';
 import { getUser } from './database.js';
+import { lookupHolidays, lookupCep, lookupCnpj, lookupDdd } from './brasil.js';
 
 // Usa football-data.org (free tier cobre principais ligas europeias + Mundial + Copa America).
 // IMPORTANTE: free tier NAO cobre Brasileirao (precisa de plano Tier Two pago).
@@ -595,10 +596,12 @@ async function getWeatherForecast(lat, lon, timezone) {
 function formatDailyLine(forecast, index, timeZone) {
   const day = forecast.daily;
   const dateStr = day.time[index];
-  const date = new Date(dateStr);
-  const weekday = new Intl.DateTimeFormat('pt-BR', { timeZone, weekday: 'short' })
+  // "2026-10-31" ja e a data local da cidade; new Date() le como meia-noite UTC,
+  // entao formatar no fuso do Brasil voltava um dia. Formata em UTC.
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  const weekday = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', weekday: 'short' })
     .format(date).replace('.', '');
-  const dateFmt = new Intl.DateTimeFormat('pt-BR', { timeZone, day: '2-digit', month: '2-digit' })
+  const dateFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit' })
     .format(date);
   const max = Math.round(day.temperature_2m_max[index]);
   const min = Math.round(day.temperature_2m_min[index]);
@@ -608,7 +611,11 @@ function formatDailyLine(forecast, index, timeZone) {
   return `${weekday} ${dateFmt}: ${min}°-${max}°C ${desc}${rainTxt}`;
 }
 
-async function lookupWeather(query, period) {
+// Cidade usada quando o usuario nao diz onde ("vai chover amanha?")
+const defaultCity = () => (process.env.DEFAULT_CITY || '').trim();
+
+async function lookupWeather(rawQuery, period) {
+  const query = rawQuery || defaultCity();
   console.log('[weather] Buscando:', query, 'periodo:', period);
   if (!query) {
     return {
@@ -664,6 +671,46 @@ async function lookupWeather(query, period) {
   };
 }
 
+// Linha curta com a previsao no horario do evento, para a confirmacao do
+// agendamento. Null quando o evento esta fora dos 16 dias que a Open-Meteo
+// cobre ou nao ha cidade (local do evento ou DEFAULT_CITY) para consultar.
+export async function getEventWeatherNote(event) {
+  const start = new Date(event?.startDateTime);
+  const hoursAhead = (start - Date.now()) / 3600000;
+  if (Number.isNaN(hoursAhead) || hoursAhead < 0 || hoursAhead > 15 * 24) return null;
+
+  let place = null;
+  if (event.location) {
+    // A cidade costuma ser a ultima parte do endereco ("Rua X, 10 - Bairro, Campinas - SP")
+    const parts = event.location.split(/[,\-–]/).map(p => p.trim()).filter(Boolean).reverse();
+    for (const part of parts.slice(0, 3)) {
+      if (/^\d|^[A-Z]{2}$/.test(part)) continue;
+      place = await geocodeCity(part).catch(() => null);
+      if (place) break;
+    }
+  }
+  if (!place && defaultCity()) place = await geocodeCity(defaultCity()).catch(() => null);
+  if (!place) return null;
+
+  const timeZone = getConfig().DEFAULT_TIMEZONE || 'America/Sao_Paulo';
+  const url = `${OPEN_METEO_FORECAST}?latitude=${place.latitude}&longitude=${place.longitude}`
+    + `&hourly=temperature_2m,precipitation_probability,weather_code`
+    + `&timezone=${encodeURIComponent(timeZone)}&forecast_days=${Math.min(Math.ceil(hoursAhead / 24) + 1, 16)}`;
+  const hourly = (await fetchJson(url))?.hourly;
+  if (!hourly?.time?.length) return null;
+
+  // A Open-Meteo devolve a hora local sem offset: "2026-10-31T14:00"
+  const localHour = new Intl.DateTimeFormat('sv-SE', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit',
+  }).format(start).replace(' ', 'T').slice(0, 13);
+  const i = hourly.time.findIndex(t => t.startsWith(localHour));
+  if (i === -1) return null;
+
+  const rain = hourly.precipitation_probability?.[i];
+  return `Previsao no horario (${place.name}): ${describeWeather(hourly.weather_code[i])}, `
+    + `${Math.round(hourly.temperature_2m[i])}°C${rain != null ? `, ${rain}% de chance de chuva` : ''}`;
+}
+
 async function searchWikipedia(query) {
   const searchUrl = `https://pt.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=1&format=json&origin=*`;
   const searchJson = await fetchJson(searchUrl);
@@ -704,6 +751,11 @@ async function lookupWiki(query) {
 
 export async function runLookup(lookup, userId) {
   const query = normalizeQuery(lookup?.query || '');
+
+  // Clima e feriados funcionam sem consulta (DEFAULT_CITY / ano atual)
+  if (lookup?.source === 'weather') return lookupWeather(query, lookup.period);
+  if (lookup?.source === 'holidays') return lookupHolidays(query);
+
   if (!query) {
     return {
       reply: 'Não recebi uma consulta suficiente para pesquisar.',
@@ -713,7 +765,9 @@ export async function runLookup(lookup, userId) {
 
   if (lookup.source === 'football') return lookupFootball(query, userId);
   if (lookup.source === 'wiki') return lookupWiki(query);
-  if (lookup.source === 'weather') return lookupWeather(query, lookup.period);
+  if (lookup.source === 'cep') return lookupCep(query);
+  if (lookup.source === 'cnpj') return lookupCnpj(query);
+  if (lookup.source === 'ddd') return lookupDdd(query);
 
   return {
     reply: 'Essa consulta ainda não tem uma fonte externa configurada.',

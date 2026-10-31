@@ -1,6 +1,9 @@
 import { planConversationTurn, friendlyAiError } from './gemini.js';
 import { createEvent, listEvents, searchEvents, deleteEvent, getUpcomingReminders, getCalendarIds, listCalendars } from './calendar.js';
-import { runLookup } from './knowledge.js';
+import { runLookup, getEventWeatherNote } from './knowledge.js';
+import { findHolidayOn } from './brasil.js';
+import { runTaskAction, completeTask } from './tasks.js';
+import { runHomeAction, executeHomeChoice } from './homeassistant.js';
 import { getConfig, isContactMode } from './config.js';
 import { installMsgKeyShim } from './compat.js';
 import pkg from 'whatsapp-web.js';
@@ -165,7 +168,33 @@ async function offerCalendarPoll(userId, client, chatId) {
 // contato sao duas mensagens: os detalhes completos e, em seguida, a enquete
 // de confirmacao. Se a enquete nao sair, a instrucao vai em texto, como no
 // self-chat — nunca fica sem como responder.
+// Avisos extras na confirmacao: feriado nacional na data e previsao do tempo no
+// horario. So informativo — falha aqui nunca impede o agendamento.
+async function getSchedulingContext(pendingAction) {
+  const events = pendingAction?.type === 'single_event' ? [pendingAction.event] : (pendingAction?.events || []);
+  if (!events.length) return '';
+  const quiet = label => error => {
+    console.warn(`[bot] Contexto do agendamento (${label}) falhou:`, error?.message || error);
+    return null;
+  };
+
+  const holidays = await Promise.all(events.map(e => findHolidayOn(e.startDateTime).catch(quiet('feriado'))));
+  const lines = [];
+  holidays.forEach((holiday, i) => {
+    if (!holiday) return;
+    const label = events.length > 1 ? `"${events[i].summary}" cai` : 'Essa data cai';
+    lines.push(`⚠️ ${label} num feriado nacional (${holiday.name}).`);
+  });
+  if (events.length === 1) {
+    const weather = await getEventWeatherNote(events[0]).catch(quiet('clima'));
+    if (weather) lines.push(weather);
+  }
+  return lines.join('\n');
+}
+
 async function sendSchedulingConfirmation(userId, client, message, chatId, pendingAction, prefix = '') {
+  const context = await getSchedulingContext(pendingAction);
+  if (context) prefix = prefix ? `${prefix}\n\n${context}` : context;
   if (isContactMode()) {
     const details = formatPendingDetails(pendingAction);
     await replyToMessage(userId, client, message, prefix ? `${prefix}\n\n${details}` : details);
@@ -656,6 +685,8 @@ async function handlePendingConfirmation(userId, client, message, chatId, confir
     // cancelado." ao manter um evento dava a entender o contrario.
     const keptMsg = pending.type === 'cancel_event'
       ? `Ok, mantive "${pending.summary}" na agenda.`
+      : pending.type === 'choice' && pending.action !== 'cancel'
+        ? 'Ok, nada foi feito.'
       : pending.type === 'cancel_multiple' || pending.type === 'choice'
         ? 'Ok, nao cancelei nada. Seus eventos continuam na agenda.'
         : 'Ok, nao agendei.';
@@ -814,15 +845,43 @@ async function handlePendingChoice(userId, client, message, chatId, index) {
     return true;
   }
 
+  if (pending.action === 'complete_task' || pending.action === 'home') {
+    pendingActions.delete(pendingKey);
+    await runChoiceAction(userId, client, message, pending, [choice]);
+    return true;
+  }
+
   return false;
+}
+
+// Conclui tarefas ou aciona dispositivos escolhidos de uma lista ("1", "todos").
+async function runChoiceAction(userId, client, message, pending, choices) {
+  try {
+    if (pending.action === 'complete_task') {
+      for (const c of choices) await completeTask(userId, c.taskId);
+      await replyToMessage(userId, client, message, `Concluida${choices.length > 1 ? 's' : ''}: ${choices.map(c => c.summary).join(', ')} ✅`);
+      return;
+    }
+    await replyToMessage(userId, client, message, await executeHomeChoice(userId, pending, choices));
+  } catch (error) {
+    console.error(`[bot:${userId}] Falha ao executar escolha (${pending.action}):`, error?.message || error);
+    await replyToMessage(userId, client, message, `Nao consegui concluir: ${error.message}`);
+  }
 }
 
 async function handlePendingChooseAll(userId, client, message, chatId) {
   const pendingKey = userScopedKey(userId, chatId);
   const pending = pendingActions.get(pendingKey);
-  if (!pending || pending.type !== 'choice' || pending.action !== 'cancel') return false;
+  if (!pending || pending.type !== 'choice') return false;
   const choices = pending.choices || [];
   if (!choices.length) return false;
+
+  if (pending.action === 'complete_task' || pending.action === 'home') {
+    pendingActions.delete(pendingKey);
+    await runChoiceAction(userId, client, message, pending, choices);
+    return true;
+  }
+  if (pending.action !== 'cancel') return false;
 
   const next = { type: 'cancel_multiple', items: choices, createdAt: Date.now() };
   pendingActions.set(pendingKey, next);
@@ -1068,6 +1127,21 @@ export async function processIncomingMessage(userId, client, message, source = '
       await replyToMessage(userId, client, message, `Nao consegui consultar a fonte externa agora. ${error.message}`);
       return;
     }
+  }
+
+  if ((plan.kind === 'task' && plan.task) || (plan.kind === 'home' && plan.home)) {
+    try {
+      const result = plan.kind === 'task'
+        ? await runTaskAction(userId, plan.task)
+        : await runHomeAction(userId, plan.home);
+      if (result.pendingAction) pendingActions.set(pendingKey, result.pendingAction);
+      await replyToMessage(userId, client, message, result.reply);
+    } catch (error) {
+      console.error(`[bot:${userId}] Erro em ${plan.kind}:`, error?.message || error);
+      const label = plan.kind === 'task' ? 'suas tarefas' : 'o Home Assistant';
+      await replyToMessage(userId, client, message, `Nao consegui acessar ${label} agora. Tente novamente em instantes.`);
+    }
+    return;
   }
 
   await replyToMessage(userId, client, message, plan.reply || 'Nao consegui interpretar sua mensagem.');
